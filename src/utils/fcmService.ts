@@ -146,13 +146,11 @@ function initializeFirebaseAdmin() {
       }
     } else {
       // Service account not found - return null gracefully
-      // During build, this is expected. At runtime, check for FIREBASE_SERVICE_ACCOUNT env var in Vercel
+      // If we get here, we're not in build time (we return early if build time)
+      // At runtime, check for FIREBASE_SERVICE_ACCOUNT env var in Vercel
       // The functions will handle null messaging instance gracefully
-      // Only log error if not in build time (to avoid build logs clutter)
-      if (!isBuildTime) {
-        console.warn('⚠️ [Firebase Admin] Service account not found - FCM features will not work until configured');
-        console.warn('💡 Set FIREBASE_SERVICE_ACCOUNT environment variable in Vercel with the service account JSON');
-      }
+      console.warn('⚠️ [Firebase Admin] Service account not found - FCM features will not work until configured');
+      console.warn('💡 Set FIREBASE_SERVICE_ACCOUNT environment variable in Vercel with the service account JSON');
       return null;
     }
   }
