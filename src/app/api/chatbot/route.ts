@@ -83,11 +83,13 @@ export async function POST(request: NextRequest) {
     conversationContext += `User: ${message}\nAssistant:`;
 
     // Try different models - error occurs during generateContent, not model initialization
+    // Mobile app uses gemini-2.5-flash, so try that first
     // Try models in order until one works
     const modelsToTry = [
-      'gemini-1.5-flash',  // Fast, stable (most common)
-      'gemini-1.5-pro',    // More capable
-      'gemini-pro'         // Legacy fallback
+      'gemini-2.0-flash-exp',  // Experimental 2.0 model
+      'gemini-1.5-flash',      // Fast, stable (most common)
+      'gemini-1.5-pro',        // More capable
+      'gemini-pro'             // Legacy fallback
     ];
     
     let aiMessage = null;
