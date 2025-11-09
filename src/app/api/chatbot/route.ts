@@ -62,36 +62,7 @@ export async function POST(request: NextRequest) {
     console.log(`🤖 [Chatbot] Processing message: "${message.substring(0, 50)}${message.length > 50 ? '...' : ''}"`);
     console.log(`📝 [Chatbot] Conversation history length: ${conversationHistory.length}`);
 
-    // Get the Gemini model
-    // Try different model names - the available models depend on API version and region
-    // Mobile app uses gemini-2.5-flash, but we'll try the most common stable models first
-    let model;
-    let modelName;
-    let lastError;
-    
-    // Try models in order of preference
-    const modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
-    
-    for (const tryModel of modelsToTry) {
-      try {
-        modelName = tryModel;
-        model = genAI.getGenerativeModel({ model: modelName });
-        console.log(`✅ Using Gemini model: ${modelName}`);
-        break; // Success, exit loop
-      } catch (modelError) {
-        lastError = modelError;
-        console.warn(`⚠️ Model ${tryModel} failed, trying next...`);
-        continue;
-      }
-    }
-    
-    // If all models failed, throw error
-    if (!model) {
-      console.error('❌ All Gemini models failed:', lastError);
-      throw new Error(`No available Gemini model found. Tried: ${modelsToTry.join(', ')}. Last error: ${lastError?.message || 'Unknown'}`);
-    }
-
-    // Build conversation context
+    // Build conversation context first
     let conversationContext = SYSTEM_PROMPT + '\n\n';
     
     // Add conversation history (last 10 messages to keep context manageable)
@@ -111,48 +82,63 @@ export async function POST(request: NextRequest) {
     // Add current user message
     conversationContext += `User: ${message}\nAssistant:`;
 
-    try {
-      // Generate response using Gemini
-      const result = await model.generateContent(conversationContext);
-      const response = await result.response;
-      const aiMessage = response.text();
-
-      console.log(`✅ [Chatbot] Response generated: "${aiMessage.substring(0, 50)}${aiMessage.length > 50 ? '...' : ''}"`);
-
-      return NextResponse.json({
-        success: true,
-        message: aiMessage,
-        timestamp: new Date().toISOString()
-      });
-    } catch (geminiError) {
-      console.error('❌ [Chatbot] Gemini API error:', geminiError);
-      console.error('❌ [Chatbot] Gemini error details:', JSON.stringify(geminiError, null, 2));
-      
-      const errorMessage = geminiError instanceof Error ? geminiError.message : 'Unknown error';
-      const errorString = String(geminiError);
-      
-      // Check for specific Gemini API errors
-      let userMessage = "I'm having trouble processing your request right now. Please try again in a moment, or feel free to ask me about travel planning, destinations in the Philippines, or how to use the app features!";
-      
-      if (errorString.includes('API key') || errorMessage.includes('API key') || errorMessage.includes('auth')) {
-        userMessage = "The chatbot service is currently unavailable due to a configuration issue. Please try again later or contact support.";
-        console.error('❌ [Chatbot] API key or authentication error detected');
-      } else if (errorString.includes('quota') || errorMessage.includes('quota') || errorMessage.includes('limit')) {
-        userMessage = "The chatbot service has reached its usage limit. Please try again later.";
-        console.error('❌ [Chatbot] Quota limit reached');
-      } else if (errorString.includes('model') || errorMessage.includes('model')) {
-        userMessage = "The chatbot service is experiencing technical difficulties. Please try again in a few moments.";
-        console.error('❌ [Chatbot] Model error detected');
+    // Try different models - error occurs during generateContent, not model initialization
+    // Try models in order until one works
+    const modelsToTry = [
+      'gemini-1.5-flash',  // Fast, stable (most common)
+      'gemini-1.5-pro',    // More capable
+      'gemini-pro'         // Legacy fallback
+    ];
+    
+    let aiMessage = null;
+    let lastError = null;
+    let usedModel = null;
+    
+    for (const modelName of modelsToTry) {
+      try {
+        console.log(`🔄 Trying Gemini model: ${modelName}`);
+        const model = genAI.getGenerativeModel({ model: modelName });
+        
+        // This is where the actual API call happens - error occurs here if model doesn't exist
+        const result = await model.generateContent(conversationContext);
+        const response = await result.response;
+        aiMessage = response.text();
+        usedModel = modelName;
+        
+        console.log(`✅ Successfully generated response using model: ${modelName}`);
+        console.log(`✅ [Chatbot] Response: "${aiMessage.substring(0, 50)}${aiMessage.length > 50 ? '...' : ''}"`);
+        break; // Success, exit loop
+      } catch (modelError: any) {
+        lastError = modelError;
+        const errorMsg = modelError?.message || String(modelError);
+        console.warn(`⚠️ Model ${modelName} failed:`, errorMsg);
+        
+        // Check if it's a "model not found" error (404)
+        if (errorMsg.includes('not found') || errorMsg.includes('404') || errorMsg.includes('is not found')) {
+          console.log(`⏭️ Model ${modelName} not available, trying next model...`);
+          continue; // Try next model
+        } else {
+          // If it's a different error (quota, auth, etc.), don't try other models
+          console.error(`❌ Model ${modelName} error (not a 404):`, errorMsg);
+          throw modelError;
+        }
       }
-      
-      // Provide fallback response if Gemini fails
-      return NextResponse.json({
-        success: false,
-        message: userMessage,
-        error: errorMessage,
-        timestamp: new Date().toISOString()
-      }, { status: 500 });
     }
+    
+    // If all models failed with 404 errors
+    if (!aiMessage) {
+      console.error('❌ All Gemini models failed. Last error:', lastError);
+      const errorMsg = lastError?.message || 'Unknown error';
+      throw new Error(`No available Gemini model found. Tried: ${modelsToTry.join(', ')}. Error: ${errorMsg}`);
+    }
+
+    // Success! Return the AI response
+    return NextResponse.json({
+      success: true,
+      message: aiMessage,
+      model: usedModel, // Include which model was used
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
     console.error('❌ [Chatbot] API error:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
