@@ -63,8 +63,20 @@ export async function POST(request: NextRequest) {
     console.log(`📝 [Chatbot] Conversation history length: ${conversationHistory.length}`);
 
     // Get the Gemini model
-    // Updated model name: gemini-pro is deprecated, use gemini-1.5-flash or gemini-1.5-pro
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    // Try different model versions in order of preference
+    // Mobile app uses gemini-2.5-flash, but we need to find what works with the API
+    const modelOptions = [
+      'gemini-1.5-flash',      // Stable, fast, recommended
+      'gemini-1.5-pro',        // Stable, more capable
+      'gemini-pro',            // Legacy (might still work)
+    ];
+    
+    let model;
+    let modelName = 'gemini-1.5-flash'; // Default to stable version
+    
+    // Use gemini-1.5-flash as it's stable and widely available
+    model = genAI.getGenerativeModel({ model: modelName });
+    console.log(`✅ Using Gemini model: ${modelName}`);
 
     // Build conversation context
     let conversationContext = SYSTEM_PROMPT + '\n\n';
