@@ -1,4 +1,4 @@
-import { getMessaging } from 'firebase-admin/messaging';
+import { getMessaging, MulticastMessage } from 'firebase-admin/messaging';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/configs/firebase';
@@ -9,21 +9,132 @@ import {
   sendPromotionalEmail 
 } from './emailService';
 
+// Type definitions
+interface UserData {
+  id: string;
+  fcmToken?: string;
+  email?: string;
+  segments?: string[];
+  uid?: string;
+  [key: string]: any;
+}
+
+interface NotificationResult {
+  success: boolean;
+  message: string;
+  successCount?: number;
+  failureCount?: number;
+  responses?: any[];
+  messageId?: string;
+  results?: Array<{
+    recipient: string;
+    success: boolean;
+    messageId?: string;
+    error?: any;
+  }>;
+}
+
+interface NotificationResults {
+  fcm: NotificationResult | null;
+  email: NotificationResult | null;
+}
+
 // Initialize Firebase Admin SDK
 if (!getApps().length) {
-  try {
-    // Try to load service account key
-    const serviceAccount = require('../../service-account.json');
+  let serviceAccount: any = null;
+  const path = require('path');
+  const fs = require('fs');
+  
+  console.log('🔍 [Firebase Admin] Looking for service account file...');
+  console.log('   Current working directory:', process.cwd());
+  console.log('   __dirname:', __dirname);
+  
+  // Try multiple paths for service account file
+  const possiblePaths = [
+    path.join(process.cwd(), 'service-account.json'), // Current working directory
+    path.join(process.cwd(), '..', 'service-account.json'), // Parent directory (admin-panel)
+    path.join(__dirname, '..', '..', 'service-account.json'), // From src/utils to go-smart-travel-admin
+    path.join(__dirname, '..', '..', '..', 'service-account.json'), // From src/utils to admin-panel
+    path.resolve(process.cwd(), 'admin-panel', 'service-account.json'), // Absolute path
+    path.resolve(process.cwd(), 'service-account.json'), // Absolute from cwd
+  ];
+  
+  // Try to find and load service account file
+  for (const serviceAccountPath of possiblePaths) {
+    try {
+      const normalizedPath = path.normalize(serviceAccountPath);
+      console.log(`   🔍 Checking: ${normalizedPath}`);
+      if (fs.existsSync(normalizedPath)) {
+        console.log(`   ✅ File exists! Reading...`);
+        const fileContent = fs.readFileSync(normalizedPath, 'utf8');
+        serviceAccount = JSON.parse(fileContent);
+        
+        // Validate service account structure
+        if (!serviceAccount.private_key || !serviceAccount.client_email) {
+          console.error(`   ❌ Invalid service account file: missing required fields`);
+          serviceAccount = null;
+          continue;
+        }
+        
+        console.log(`   ✅ Successfully loaded service account from: ${normalizedPath}`);
+        break;
+      } else {
+        console.log(`   ❌ File does not exist`);
+      }
+    } catch (err: any) {
+      console.error(`   ❌ Error checking ${serviceAccountPath}: ${err.message}`);
+      // Continue to next path
+    }
+  }
+  
+  // Also try environment variables as fallback
+  if (!serviceAccount) {
+    console.log('⚠️ [Firebase Admin] Service account file not found, checking environment variables...');
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        console.log('✅ Found service account in environment variable');
+      } catch (err: any) {
+        console.error('❌ Error parsing FIREBASE_SERVICE_ACCOUNT environment variable:', err.message);
+      }
+    } else {
+      console.log('   ❌ FIREBASE_SERVICE_ACCOUNT environment variable not set');
+    }
+  }
+  
+  if (serviceAccount) {
+    try {
+      console.log('🔧 [Firebase Admin] Initializing with service account credentials...');
     initializeApp({
       credential: cert(serviceAccount),
       projectId: "go-smart-travel-app"
     });
-  } catch (error) {
-    console.warn('Service account key not found, using default credentials');
-    // Fallback to default credentials (for development)
-    initializeApp({
-      projectId: "go-smart-travel-app"
+      console.log('✅ [Firebase Admin] SDK initialized successfully with service account');
+    } catch (initError: any) {
+      console.error('❌ [Firebase Admin] Error initializing with service account:', initError.message);
+      console.error('   Stack:', initError.stack);
+      throw initError;
+    }
+  } else {
+    console.error('\n❌ [Firebase Admin] Service account file not found in any of these locations:');
+    possiblePaths.forEach(p => {
+      try {
+        const normalized = path.normalize(p);
+        const exists = fs.existsSync(normalized);
+        console.error(`   ${exists ? '✅ EXISTS' : '❌ NOT FOUND'}: ${normalized}`);
+      } catch (e) {
+        console.error(`   ❌ ERROR: ${p}`);
+      }
     });
+    console.error('\n💡 Solutions:');
+    console.error('   1. Copy service-account.json to admin-panel/go-smart-travel-admin/ folder');
+    console.error('   2. Copy service-account.json to admin-panel/ folder');
+    console.error('   3. Set FIREBASE_SERVICE_ACCOUNT environment variable with the JSON content');
+    
+    // Don't fall through to default credentials - throw error instead
+    const error = new Error('Service account file not found. Please ensure service-account.json exists or set FIREBASE_SERVICE_ACCOUNT environment variable.');
+    console.error('\n❌ THROWING ERROR (not using default credentials):', error.message);
+    throw error;
   }
 }
 
@@ -46,7 +157,7 @@ export const sendNotificationToTokens = async (tokens: string[], notification: F
   try {
     console.log(`📱 Sending FCM notification to ${tokens.length} tokens...`);
     
-    const message = {
+    const message: MulticastMessage = {
       notification: {
         title: notification.title,
         body: notification.message,
@@ -56,7 +167,7 @@ export const sendNotificationToTokens = async (tokens: string[], notification: F
         ...notification.data,
         actionUrl: notification.actionUrl || '',
         click_action: notification.actionUrl || ''
-      },
+      } as { [key: string]: string },
       tokens: tokens,
       android: {
         notification: {
@@ -75,14 +186,14 @@ export const sendNotificationToTokens = async (tokens: string[], notification: F
       }
     };
 
-    const response = await messaging.sendMulticast(message);
+    const response = await messaging.sendEachForMulticast(message);
     
     console.log('📱 FCM notification sent:', response);
     console.log(`✅ Successfully sent: ${response.successCount}`);
     console.log(`❌ Failed: ${response.failureCount}`);
     
     if (response.failureCount > 0) {
-      response.responses.forEach((resp, idx) => {
+      response.responses.forEach((resp: any, idx: number) => {
         if (!resp.success) {
           console.warn(`Failed to send to token ${idx}:`, resp.error);
         }
@@ -111,19 +222,19 @@ export const sendNotificationToAll = async (notification: FCMNotificationData) =
     
     // Fetch all users from Firebase
     const usersSnapshot = await getDocs(collection(db, 'users'));
-    const users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const users: UserData[] = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserData));
     
     const fcmTokens = users
       .map(user => user.fcmToken)
-      .filter(token => token && typeof token === 'string' && token.length > 0);
+      .filter((token): token is string => typeof token === 'string' && token.length > 0);
     
     const emailAddresses = users
       .map(user => user.email)
-      .filter(email => email && typeof email === 'string' && email.includes('@'));
+      .filter((email): email is string => typeof email === 'string' && email.includes('@'));
     
     console.log(`📱 Found ${fcmTokens.length} FCM tokens and ${emailAddresses.length} email addresses`);
     
-    const results = {
+    const results: NotificationResults = {
       fcm: null,
       email: null
     };
@@ -180,8 +291,8 @@ export const sendNotificationToSegments = async (segments: string[], notificatio
     
     // Fetch users for specific segments
     const usersSnapshot = await getDocs(collection(db, 'users'));
-    const users = usersSnapshot.docs
-      .map(doc => ({ id: doc.id, ...doc.data() }))
+    const users: UserData[] = usersSnapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as UserData))
       .filter(user => {
         const userSegments = user.segments || [];
         return segments.some(segment => userSegments.includes(segment));
@@ -189,15 +300,15 @@ export const sendNotificationToSegments = async (segments: string[], notificatio
     
     const fcmTokens = users
       .map(user => user.fcmToken)
-      .filter(token => token && typeof token === 'string' && token.length > 0);
+      .filter((token): token is string => typeof token === 'string' && token.length > 0);
     
     const emailAddresses = users
       .map(user => user.email)
-      .filter(email => email && typeof email === 'string' && email.includes('@'));
+      .filter((email): email is string => typeof email === 'string' && email.includes('@'));
     
     console.log(`📱 Found ${fcmTokens.length} FCM tokens and ${emailAddresses.length} email addresses for segments`);
     
-    const results = {
+    const results: NotificationResults = {
       fcm: null,
       email: null
     };
@@ -253,28 +364,28 @@ export const sendNotificationToUsers = async (userIds: string[], notification: F
     console.log(`📱 Fetching user data for ${userIds.length} users...`);
     
     // Fetch user data for specific users
-    const users = [];
+    const users: UserData[] = [];
     
     for (const userId of userIds) {
       const userQuery = query(collection(db, 'users'), where('uid', '==', userId));
       const userSnapshot = await getDocs(userQuery);
       
       userSnapshot.forEach(doc => {
-        users.push({ id: doc.id, ...doc.data() });
+        users.push({ id: doc.id, ...doc.data() } as UserData);
       });
     }
     
     const fcmTokens = users
       .map(user => user.fcmToken)
-      .filter(token => token && typeof token === 'string' && token.length > 0);
+      .filter((token): token is string => typeof token === 'string' && token.length > 0);
     
     const emailAddresses = users
       .map(user => user.email)
-      .filter(email => email && typeof email === 'string' && email.includes('@'));
+      .filter((email): email is string => typeof email === 'string' && email.includes('@'));
     
     console.log(`📱 Found ${fcmTokens.length} FCM tokens and ${emailAddresses.length} email addresses for specified users`);
     
-    const results = {
+    const results: NotificationResults = {
       fcm: null,
       email: null
     };
@@ -344,7 +455,7 @@ export const sendTripReminder = async (
     sendEmail: true
   };
 
-  const results = {
+  const results: NotificationResults = {
     fcm: null,
     email: null
   };
@@ -399,7 +510,7 @@ export const sendWeatherAlert = async (
     sendEmail: true
   };
 
-  const results = {
+  const results: NotificationResults = {
     fcm: null,
     email: null
   };
@@ -454,7 +565,7 @@ export const sendPromoNotification = async (
     sendEmail: true
   };
 
-  const results = {
+  const results: NotificationResults = {
     fcm: null,
     email: null
   };

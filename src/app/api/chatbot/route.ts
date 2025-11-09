@@ -63,13 +63,33 @@ export async function POST(request: NextRequest) {
     console.log(`📝 [Chatbot] Conversation history length: ${conversationHistory.length}`);
 
     // Get the Gemini model
-    // The mobile app uses gemini-2.5-flash, but that might not be available in all API versions
-    // Try using the model name that works with the current API version
-    // Based on error, v1beta API might not support newer models
-    // Use the most basic stable model name
-    const modelName = 'gemini-pro'; // Use the original stable model name
-    const model = genAI.getGenerativeModel({ model: modelName });
-    console.log(`✅ Using Gemini model: ${modelName}`);
+    // Try different model names - the available models depend on API version and region
+    // Mobile app uses gemini-2.5-flash, but we'll try the most common stable models first
+    let model;
+    let modelName;
+    let lastError;
+    
+    // Try models in order of preference
+    const modelsToTry = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
+    
+    for (const tryModel of modelsToTry) {
+      try {
+        modelName = tryModel;
+        model = genAI.getGenerativeModel({ model: modelName });
+        console.log(`✅ Using Gemini model: ${modelName}`);
+        break; // Success, exit loop
+      } catch (modelError) {
+        lastError = modelError;
+        console.warn(`⚠️ Model ${tryModel} failed, trying next...`);
+        continue;
+      }
+    }
+    
+    // If all models failed, throw error
+    if (!model) {
+      console.error('❌ All Gemini models failed:', lastError);
+      throw new Error(`No available Gemini model found. Tried: ${modelsToTry.join(', ')}. Last error: ${lastError?.message || 'Unknown'}`);
+    }
 
     // Build conversation context
     let conversationContext = SYSTEM_PROMPT + '\n\n';

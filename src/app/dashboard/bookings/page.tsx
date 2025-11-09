@@ -35,6 +35,18 @@ type Booking = {
     timestamp: any;
     note?: string;
   }>;
+  // Customization fields
+  isCustomized?: boolean;
+  customizationId?: string;
+  customizedItinerary?: any;
+  removedPlaces?: Array<{
+    name?: string;
+    activity?: string;
+    day?: number;
+    dayTitle?: string;
+    activityId?: string;
+  }>;
+  originalItinerary?: any;
 };
 
 export default function BookingsPage() {
@@ -114,7 +126,13 @@ export default function BookingsPage() {
             contactInfo: data.contactInfo || 'No contact information',
             specialRequests: data.specialRequests || '',
             notes: data.notes || '',
-            statusHistory: data.statusHistory || []
+            statusHistory: data.statusHistory || [],
+            // Customization fields
+            isCustomized: data.isCustomized || false,
+            customizationId: data.customizationId || '',
+            customizedItinerary: data.customizedItinerary || null,
+            removedPlaces: data.removedPlaces || [],
+            originalItinerary: data.originalItinerary || null
           });
         });
         
@@ -761,6 +779,14 @@ export default function BookingsPage() {
                       <tr key={booking.id}>
                         <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{booking.tourName}</div>
+                        {booking.isCustomized && (
+                          <div className="text-xs text-cyan-400 mt-1 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            Customized Tour
+                          </div>
+                        )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{booking.userName}</div>
@@ -865,7 +891,17 @@ export default function BookingsPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <h4 className="text-sm font-medium text-gray-400 mb-1">Tour</h4>
-                  <p className="text-lg font-semibold text-gray-900 mb-4">{selectedBooking.tourName}</p>
+                  <div className="flex items-center gap-2 mb-4">
+                    <p className="text-lg font-semibold text-gray-900">{selectedBooking.tourName}</p>
+                    {selectedBooking.isCustomized && (
+                      <span className="px-2 py-1 text-xs font-medium bg-cyan-100 text-cyan-800 rounded-full flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Customized
+                      </span>
+                    )}
+                  </div>
                   
                   <h4 className="text-sm font-medium text-gray-400 mb-1">Customer</h4>
                   <p className="text-sm font-medium text-gray-900">{selectedBooking.userName}</p>
@@ -919,6 +955,61 @@ export default function BookingsPage() {
                   <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md">
                     {selectedBooking.specialRequests}
                   </p>
+                </div>
+              )}
+              
+              {/* Customized Itinerary Section */}
+              {selectedBooking.isCustomized && selectedBooking.customizedItinerary && (
+                <div className="mt-6 border-t border-gray-300 pt-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-cyan-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <h3 className="text-lg font-semibold text-gray-900">Customized Itinerary</h3>
+                  </div>
+                  
+                  {selectedBooking.removedPlaces && selectedBooking.removedPlaces.length > 0 && (
+                    <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-md">
+                      <h4 className="text-sm font-medium text-orange-900 mb-2">Removed Places:</h4>
+                      <ul className="list-disc list-inside space-y-1">
+                        {selectedBooking.removedPlaces.map((place, index) => (
+                          <li key={index} className="text-sm text-orange-800">
+                            {place.activity || place.name} ({place.dayTitle || `Day ${place.day}`})
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  {selectedBooking.customizedItinerary.days && Array.isArray(selectedBooking.customizedItinerary.days) && (
+                    <div className="space-y-4">
+                      {selectedBooking.customizedItinerary.days.map((day: any, dayIndex: number) => (
+                        <div key={dayIndex} className="bg-gray-50 p-4 rounded-md border border-gray-200">
+                          <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                            {day.title || `Day ${dayIndex + 1}`}
+                          </h4>
+                          {day.activities && Array.isArray(day.activities) && day.activities.length > 0 ? (
+                            <ul className="space-y-2">
+                              {day.activities.map((activity: any, actIndex: number) => (
+                                <li key={actIndex} className="flex items-start">
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-600 mr-2 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                  <span className="text-sm text-gray-700">
+                                    {activity.name || activity.description || activity}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-sm text-gray-600 italic">
+                              {day.description || 'No activities for this day'}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               

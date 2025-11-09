@@ -7,6 +7,7 @@ interface NotificationForm {
   title: string;
   message: string;
   sendEmail: boolean;
+  sendSMS: boolean;
 }
 
 interface SegmentForm {
@@ -14,6 +15,7 @@ interface SegmentForm {
   title: string;
   message: string;
   sendEmail: boolean;
+  sendSMS: boolean;
 }
 
 export default function NotificationsPage() {
@@ -25,14 +27,16 @@ export default function NotificationsPage() {
   const [broadcastForm, setBroadcastForm] = useState<NotificationForm>({
     title: '',
     message: '',
-    sendEmail: false
+    sendEmail: false,
+    sendSMS: false
   });
 
   const [segmentForm, setSegmentForm] = useState<SegmentForm>({
     segments: [],
     title: '',
     message: '',
-    sendEmail: false
+    sendEmail: false,
+    sendSMS: false
   });
 
   // Template forms
@@ -72,7 +76,8 @@ export default function NotificationsPage() {
           data: {
             title: broadcastForm.title,
             message: broadcastForm.message,
-            sendEmail: broadcastForm.sendEmail
+            sendEmail: broadcastForm.sendEmail,
+            sendSMS: broadcastForm.sendSMS
           }
         })
       });
@@ -115,7 +120,8 @@ export default function NotificationsPage() {
             segments: segmentForm.segments,
             title: segmentForm.title,
             message: segmentForm.message,
-            sendEmail: segmentForm.sendEmail
+            sendEmail: segmentForm.sendEmail,
+            sendSMS: segmentForm.sendSMS
           }
         })
       });
@@ -200,6 +206,7 @@ export default function NotificationsPage() {
           type: 'promotional',
           data: {
             segments: promoForm.segments,
+            sendSMS: true, // Always send SMS for promotional notifications
             promoData: {
               title: promoForm.title,
               message: promoForm.message,
@@ -222,8 +229,8 @@ export default function NotificationsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-3xl font-semibold text-gray-900 mb-2">📱 Push Notifications</h1>
-        <p className="text-gray-400">Send notifications to your users through push notifications and email</p>
+        <h1 className="text-3xl font-semibold text-gray-900 mb-2">📱 Notifications</h1>
+        <p className="text-gray-400">Send notifications to your users through Push, Email, and SMS</p>
       </div>
 
       {/* Tabs */}
@@ -281,18 +288,33 @@ export default function NotificationsPage() {
                 required
               />
             </div>
-            <div className="flex items-center p-4 bg-gray-100 rounded-lg">
-              <input
-                type="checkbox"
-                id="broadcast-send-email"
-                checked={broadcastForm.sendEmail}
-                onChange={(e) => setBroadcastForm({...broadcastForm, sendEmail: e.target.checked})}
-                className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-              />
-              <label htmlFor="broadcast-send-email" className="text-sm font-medium text-gray-700 flex items-center">
-                <span className="text-lg mr-2">📧</span>
-                Also send email notifications
-              </label>
+            <div className="space-y-3">
+              <div className="flex items-center p-4 bg-gray-100 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="broadcast-send-email"
+                  checked={broadcastForm.sendEmail}
+                  onChange={(e) => setBroadcastForm({...broadcastForm, sendEmail: e.target.checked})}
+                  className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                />
+                <label htmlFor="broadcast-send-email" className="text-sm font-medium text-gray-700 flex items-center">
+                  <span className="text-lg mr-2">📧</span>
+                  Also send email notifications
+                </label>
+              </div>
+              <div className="flex items-center p-4 bg-gray-100 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="broadcast-send-sms"
+                  checked={broadcastForm.sendSMS}
+                  onChange={(e) => setBroadcastForm({...broadcastForm, sendSMS: e.target.checked})}
+                  className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                />
+                <label htmlFor="broadcast-send-sms" className="text-sm font-medium text-gray-700 flex items-center">
+                  <span className="text-lg mr-2">📱</span>
+                  Also send SMS notifications
+                </label>
+              </div>
             </div>
             <button
               type="submit"
@@ -370,18 +392,33 @@ export default function NotificationsPage() {
                 required
               />
             </div>
-            <div className="flex items-center p-4 bg-gray-100 rounded-lg">
-              <input
-                type="checkbox"
-                id="segment-send-email"
-                checked={segmentForm.sendEmail}
-                onChange={(e) => setSegmentForm({...segmentForm, sendEmail: e.target.checked})}
-                className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-              />
-              <label htmlFor="segment-send-email" className="text-sm font-medium text-gray-700 flex items-center">
-                <span className="text-lg mr-2">📧</span>
-                Also send email notifications
-              </label>
+            <div className="space-y-3">
+              <div className="flex items-center p-4 bg-gray-100 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="segment-send-email"
+                  checked={segmentForm.sendEmail}
+                  onChange={(e) => setSegmentForm({...segmentForm, sendEmail: e.target.checked})}
+                  className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                />
+                <label htmlFor="segment-send-email" className="text-sm font-medium text-gray-700 flex items-center">
+                  <span className="text-lg mr-2">📧</span>
+                  Also send email notifications
+                </label>
+              </div>
+              <div className="flex items-center p-4 bg-gray-100 rounded-lg">
+                <input
+                  type="checkbox"
+                  id="segment-send-sms"
+                  checked={segmentForm.sendSMS}
+                  onChange={(e) => setSegmentForm({...segmentForm, sendSMS: e.target.checked})}
+                  className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                />
+                <label htmlFor="segment-send-sms" className="text-sm font-medium text-gray-700 flex items-center">
+                  <span className="text-lg mr-2">📱</span>
+                  Also send SMS notifications
+                </label>
+              </div>
             </div>
             <button
               type="submit"
@@ -674,13 +711,37 @@ export default function NotificationsPage() {
           </h3>
           {result.success ? (
             <div>
-              <p className="text-green-300 mb-4 text-lg">📱 Your notification has been sent to users' phones!</p>
+              {result.data?.emailSkipped ? (
+                <div className="bg-yellow-800 bg-opacity-30 p-4 rounded-lg mb-4 border border-yellow-700">
+                  <p className="text-yellow-300 font-medium mb-2">⚠️ Email Sending Disabled</p>
+                  <p className="text-yellow-200 text-sm mb-2">
+                    Email notifications are disabled in OneSignal. Notification was sent via Push and SMS only.
+                  </p>
+                  <p className="text-yellow-300 text-sm">
+                    To enable email, contact OneSignal Support or configure email in OneSignal Dashboard.
+                  </p>
+                </div>
+              ) : null}
+              <p className="text-green-300 mb-4 text-lg">
+                {broadcastForm.sendSMS || segmentForm.sendSMS 
+                  ? result.data?.emailSkipped
+                    ? '📱 Your notification has been sent via Push and SMS!'
+                    : '📱 Your notification has been sent via Push, Email, and SMS!'
+                  : '📱 Your notification has been sent to users\' phones!'}
+              </p>
               <div className="bg-green-800 bg-opacity-30 p-4 rounded-lg mb-4">
                 <p className="text-green-300 font-medium mb-2">📊 Notification Details:</p>
                 <div className="space-y-1">
-                  <p className="text-green-200">• Notification ID: {result.data?.id || 'N/A'}</p>
-                  <p className="text-green-200">• Recipients: {result.data?.recipients || 'All users'}</p>
-                  <p className="text-green-200">• Status: {result.data?.success ? 'Delivered' : 'Pending'}</p>
+                  <p className="text-green-200">• Notification ID: {result.data?.id || result.id || 'N/A'}</p>
+                  <p className="text-green-200">• Recipients: {result.data?.recipients || result.recipients || 'All users'}</p>
+                  <p className="text-green-200">• Channels: {
+                    result.data?.emailSkipped
+                      ? 'Push + SMS (Email skipped)'
+                      : broadcastForm.sendSMS || segmentForm.sendSMS 
+                        ? 'Push + Email + SMS' 
+                        : 'Push Notification'
+                  }</p>
+                  <p className="text-green-200">• Status: {result.data?.success !== false ? 'Delivered' : 'Pending'}</p>
                 </div>
               </div>
               <details className="mt-4">

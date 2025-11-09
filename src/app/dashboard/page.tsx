@@ -48,8 +48,8 @@ const StatCard = ({
         {/* Icon in white rounded square */}
         <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center flex-shrink-0" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
           <div className="text-blue-500">
-            {icon}
-          </div>
+      {icon}
+    </div>
         </div>
         
         {/* Title, Value, and Percentage */}
@@ -68,9 +68,9 @@ const StatCard = ({
             )}
           </div>
         </div>
-      </div>
     </div>
-  );
+  </div>
+);
 };
 
 // Recent Activity Item Component
@@ -291,65 +291,65 @@ export default function DashboardPage() {
         
         // Only fetch activities if they haven't been cleared
         if (cleared !== 'true') {
-          // Fetch recent activities
-          const activitiesQuery = query(
-            collection(db, 'activities'),
-            orderBy('timestamp', 'desc'),
-            limit(5)
-          );
-          
-          const activitiesSnapshot = await getDocs(activitiesQuery);
-          const activities = activitiesSnapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              title: data.title || 'Activity',
-              description: data.description || 'No description',
-              time: formatTimestamp(data.timestamp),
-              type: data.type || 'general'
-            };
-          });
-          
-          setRecentActivity(activities);
+        // Fetch recent activities
+        const activitiesQuery = query(
+          collection(db, 'activities'),
+          orderBy('timestamp', 'desc'),
+          limit(5)
+        );
+        
+        const activitiesSnapshot = await getDocs(activitiesQuery);
+        const activities = activitiesSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            title: data.title || 'Activity',
+            description: data.description || 'No description',
+            time: formatTimestamp(data.timestamp),
+            type: data.type || 'general'
+          };
+        });
+        
+        setRecentActivity(activities);
 
-          // Fetch recent tours
-          const toursQuery = query(
-            collection(db, 'tours'),
-            orderBy('createdAt', 'desc'),
-            limit(5)
-          );
-          const recentToursSnapshot = await getDocs(toursQuery);
-          const recentToursList = recentToursSnapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              name: data.name || 'Untitled Tour',
-              location: data.location || 'Unknown Location',
-              price: data.price || 0,
-              createdAt: data.createdAt
-            };
-          });
-          setRecentTours(recentToursList);
+        // Fetch recent tours
+        const toursQuery = query(
+          collection(db, 'tours'),
+          orderBy('createdAt', 'desc'),
+          limit(5)
+        );
+        const recentToursSnapshot = await getDocs(toursQuery);
+        const recentToursList = recentToursSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            name: data.name || 'Untitled Tour',
+            location: data.location || 'Unknown Location',
+            price: data.price || 0,
+            createdAt: data.createdAt
+          };
+        });
+        setRecentTours(recentToursList);
 
-          // Fetch recent bookings
-          const bookingsQuery = query(
-            collection(db, 'bookings'),
-            orderBy('createdAt', 'desc'),
-            limit(5)
-          );
-          const recentBookingsSnapshot = await getDocs(bookingsQuery);
-          const recentBookingsList = recentBookingsSnapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              userName: data.userName || 'Unknown User',
-              tourName: data.tourName || 'Untitled Tour',
-              totalAmount: data.totalAmount || 0,
-              status: data.status || 'Pending',
-              createdAt: data.createdAt
-            };
-          });
-          setRecentBookings(recentBookingsList);
+        // Fetch recent bookings
+        const bookingsQuery = query(
+          collection(db, 'bookings'),
+          orderBy('createdAt', 'desc'),
+          limit(5)
+        );
+        const recentBookingsSnapshot = await getDocs(bookingsQuery);
+        const recentBookingsList = recentBookingsSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            userName: data.userName || 'Unknown User',
+            tourName: data.tourName || 'Untitled Tour',
+            totalAmount: data.totalAmount || 0,
+            status: data.status || 'Pending',
+            createdAt: data.createdAt
+          };
+        });
+        setRecentBookings(recentBookingsList);
         }
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
@@ -361,9 +361,9 @@ export default function DashboardPage() {
           revenue: '₱0'
         });
         if (cleared !== 'true') {
-          setRecentActivity([]);
-          setRecentTours([]);
-          setRecentBookings([]);
+        setRecentActivity([]);
+        setRecentTours([]);
+        setRecentBookings([]);
         }
       } finally {
         setLoading(false);
