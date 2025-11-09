@@ -146,27 +146,13 @@ function initializeFirebaseAdmin() {
       }
     } else {
       // Service account not found - return null gracefully
-      // During build, this is expected. At runtime, check for FIREBASE_SERVICE_ACCOUNT env var
+      // During build, this is expected. At runtime, check for FIREBASE_SERVICE_ACCOUNT env var in Vercel
       // The functions will handle null messaging instance gracefully
-      return null;
-      
-      console.error('\n❌ [Firebase Admin] Service account file not found in any of these locations:');
-      possiblePaths.forEach(p => {
-        try {
-          const normalized = path.normalize(p);
-          const exists = fs.existsSync(normalized);
-          console.error(`   ${exists ? '✅ EXISTS' : '❌ NOT FOUND'}: ${normalized}`);
-        } catch (e) {
-          console.error(`   ❌ ERROR: ${p}`);
-        }
-      });
-      console.error('\n💡 Solutions:');
-      console.error('   1. Copy service-account.json to admin-panel/go-smart-travel-admin/ folder');
-      console.error('   2. Copy service-account.json to admin-panel/ folder');
-      console.error('   3. Set FIREBASE_SERVICE_ACCOUNT environment variable with the JSON content');
-      
-      // Don't throw during build - just return null
-      console.warn('⚠️ [Firebase Admin] Service account not found - FCM features will not work until configured');
+      // Only log error if not in build time (to avoid build logs clutter)
+      if (!isBuildTime) {
+        console.warn('⚠️ [Firebase Admin] Service account not found - FCM features will not work until configured');
+        console.warn('💡 Set FIREBASE_SERVICE_ACCOUNT environment variable in Vercel with the service account JSON');
+      }
       return null;
     }
   }
