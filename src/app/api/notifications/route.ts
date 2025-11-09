@@ -27,7 +27,7 @@ import {
   sendBookingConfirmationSMS
 } from '../../../utils/textBeeService';
 import { db } from '@/configs/firebase';
-import { adminDb, FieldValue } from '@/configs/firebaseAdmin';
+import { getAdminDb, FieldValue } from '@/configs/firebaseAdmin';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 
 export async function POST(request: NextRequest) {
@@ -166,6 +166,11 @@ export async function POST(request: NextRequest) {
               userPhoto: null,
               data: data.data || {}
             };
+            const adminDb = getAdminDb();
+            if (!adminDb) {
+              console.warn('⚠️ Firebase Admin not initialized - skipping notification save to Firestore');
+              return null;
+            }
             return adminDb.collection('notifications').add(notificationData);
           });
           
@@ -311,6 +316,11 @@ export async function POST(request: NextRequest) {
               userPhoto: null,
               data: data.data || {}
             };
+            const adminDb = getAdminDb();
+            if (!adminDb) {
+              console.warn('⚠️ Firebase Admin not initialized - skipping notification save to Firestore');
+              return null;
+            }
             return adminDb.collection('notifications').add(notificationData);
           });
           
@@ -574,6 +584,11 @@ export async function POST(request: NextRequest) {
                 actionUrl: data.promoData.actionUrl
               }
             };
+            const adminDb = getAdminDb();
+            if (!adminDb) {
+              console.warn('⚠️ Firebase Admin not initialized - skipping notification save to Firestore');
+              return null;
+            }
             return adminDb.collection('notifications').add(notificationData);
           });
           
@@ -631,7 +646,12 @@ export async function POST(request: NextRequest) {
                 userPhoto: null,
                 data: data.data || {}
               };
-              return adminDb.collection('notifications').add(notificationData);
+              const adminDb = getAdminDb();
+            if (!adminDb) {
+              console.warn('⚠️ Firebase Admin not initialized - skipping notification save to Firestore');
+              return null;
+            }
+            return adminDb.collection('notifications').add(notificationData);
             });
             
             await Promise.all(notificationPromises);

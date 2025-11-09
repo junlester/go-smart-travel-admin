@@ -1,14 +1,81 @@
 // Firebase Admin SDK configuration for server-side operations
-// Reuse the same Firebase Admin SDK initialization from fcmService.ts
-// This ensures we don't initialize multiple times and use the same credentials
+// Lazy initialization to prevent build-time errors
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getApps, initializeApp, cert } from 'firebase-admin/app';
 
-// Import fcmService to ensure Firebase Admin SDK is initialized
-// fcmService.ts already initializes Firebase Admin SDK, so we just reuse it
-import '../utils/fcmService';
+// Lazy initialization - only initialize when actually needed
+let adminDb: ReturnType<typeof getFirestore> | null = null;
+let isAdminInitialized = false;
 
-// Get Firestore instance (will use the already initialized Firebase Admin SDK)
-const adminDb = getFirestore();
+function initializeAdminFirestore() {
+  // Skip initialization during build time
+  const isBuildTime = 
+    process.env.NEXT_PHASE === 'phase-production-build' ||
+    process.env.NEXT_PHASE === 'phase-export' ||
+    (typeof process !== 'undefined' && process.env.VERCEL === '1' && !process.env.VERCEL_ENV) ||
+    (typeof window === 'undefined' && process.env.NODE_ENV === 'production' && !process.env.VERCEL_ENV);
+  
+  if (isBuildTime) {
+    return null;
+  }
 
-export { adminDb, FieldValue };
+  // Skip if already initialized
+  if (isAdminInitialized && adminDb) {
+    return adminDb;
+  }
+
+  // Initialize Firebase Admin if not already initialized
+  if (!getApps().length) {
+    let serviceAccount: any = null;
+    
+    // Try environment variable first (for Vercel)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      } catch (err) {
+        console.error('❌ Error parsing FIREBASE_SERVICE_ACCOUNT:', err);
+      }
+    }
+    
+    // If no service account, return null (will be handled gracefully)
+    if (!serviceAccount) {
+      return null;
+    }
+    
+    try {
+      initializeApp({
+        credential: cert(serviceAccount),
+        projectId: "go-smart-travel-app"
+      });
+      isAdminInitialized = true;
+    } catch (error: any) {
+      console.error('❌ Error initializing Firebase Admin:', error.message);
+      return null;
+    }
+  }
+
+  // Get Firestore instance
+  try {
+    adminDb = getFirestore();
+    isAdminInitialized = true;
+    return adminDb;
+  } catch (error: any) {
+    console.error('❌ Error getting Firestore instance:', error.message);
+    return null;
+  }
+}
+
+// Lazy getter for adminDb - only initializes when called
+export function getAdminDb() {
+  if (!adminDb) {
+    adminDb = initializeAdminFirestore();
+  }
+  return adminDb;
+}
+
+export { FieldValue };
+
+// Simple approach: Just export the getter function
+// Routes should use getAdminDb() instead of direct adminDb access
+// This ensures lazy initialization and prevents build-time errors
 
