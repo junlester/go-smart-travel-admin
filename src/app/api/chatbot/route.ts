@@ -83,13 +83,14 @@ export async function POST(request: NextRequest) {
     conversationContext += `User: ${message}\nAssistant:`;
 
     // Try different models - error occurs during generateContent, not model initialization
-    // Mobile app uses gemini-2.5-flash, so try that first
-    // Try models in order until one works
+    // The error says models are not found for API version v1beta
+    // Try gemini-pro first (original stable model that works with v1beta)
+    // Then try newer models
     const modelsToTry = [
-      'gemini-2.0-flash-exp',  // Experimental 2.0 model
-      'gemini-1.5-flash',      // Fast, stable (most common)
-      'gemini-1.5-pro',        // More capable
-      'gemini-pro'             // Legacy fallback
+      'gemini-pro',            // Original stable model (works with v1beta)
+      'gemini-1.5-flash',      // Fast, stable (might need v1 API)
+      'gemini-1.5-pro',        // More capable (might need v1 API)
+      'gemini-2.0-flash-exp'   // Experimental 2.0 model
     ];
     
     let aiMessage = null;
