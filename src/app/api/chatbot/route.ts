@@ -63,7 +63,8 @@ export async function POST(request: NextRequest) {
     console.log(`📝 [Chatbot] Conversation history length: ${conversationHistory.length}`);
 
     // Get the Gemini model
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    // Updated model name: gemini-pro is deprecated, use gemini-1.5-flash or gemini-1.5-pro
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     // Build conversation context
     let conversationContext = SYSTEM_PROMPT + '\n\n';
