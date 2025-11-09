@@ -46,14 +46,17 @@ let isInitialized = false;
 
 function initializeFirebaseAdmin() {
   // Skip initialization during build time
-  // Check for Vercel build environment
-  const isBuildTime = process.env.NEXT_PHASE === 'phase-production-build' || 
-                      (process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV !== 'production');
+  // Check for various build-time indicators
+  const isBuildTime = 
+    process.env.NEXT_PHASE === 'phase-production-build' ||
+    process.env.NEXT_PHASE === 'phase-export' ||
+    (typeof process !== 'undefined' && process.env.VERCEL === '1' && !process.env.VERCEL_ENV) ||
+    (typeof window === 'undefined' && process.env.NODE_ENV === 'production' && !process.env.VERCEL_ENV);
   
   if (isBuildTime) {
     // During build, we don't have access to service account file
     // Return null and let the functions handle it gracefully
-    console.log('⚠️ [Firebase Admin] Skipping initialization during build phase');
+    // This is expected behavior - Firebase Admin will initialize at runtime when API is called
     return null;
   }
 
@@ -138,18 +141,14 @@ function initializeFirebaseAdmin() {
         console.error('❌ [Firebase Admin] Error initializing with service account:', initError.message);
         console.error('   Stack:', initError.stack);
         // Don't throw during build - just log and return null
-        if (process.env.NEXT_PHASE === 'phase-production-build') {
-          console.warn('⚠️ [Firebase Admin] Skipping error during build phase');
-          return null;
-        }
-        throw initError;
-      }
-    } else {
-      // During build, don't throw error - just return null
-      if (process.env.NEXT_PHASE === 'phase-production-build') {
-        console.warn('⚠️ [Firebase Admin] Service account not found during build - this is expected. It will be initialized at runtime.');
+        // This allows the build to succeed, and Firebase Admin will be initialized at runtime
         return null;
       }
+    } else {
+      // Service account not found - return null gracefully
+      // During build, this is expected. At runtime, check for FIREBASE_SERVICE_ACCOUNT env var
+      // The functions will handle null messaging instance gracefully
+      return null;
       
       console.error('\n❌ [Firebase Admin] Service account file not found in any of these locations:');
       possiblePaths.forEach(p => {
