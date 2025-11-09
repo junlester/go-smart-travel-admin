@@ -63,19 +63,12 @@ export async function POST(request: NextRequest) {
     console.log(`📝 [Chatbot] Conversation history length: ${conversationHistory.length}`);
 
     // Get the Gemini model
-    // Try different model versions in order of preference
-    // Mobile app uses gemini-2.5-flash, but we need to find what works with the API
-    const modelOptions = [
-      'gemini-1.5-flash',      // Stable, fast, recommended
-      'gemini-1.5-pro',        // Stable, more capable
-      'gemini-pro',            // Legacy (might still work)
-    ];
-    
-    let model;
-    let modelName = 'gemini-1.5-flash'; // Default to stable version
-    
-    // Use gemini-1.5-flash as it's stable and widely available
-    model = genAI.getGenerativeModel({ model: modelName });
+    // The mobile app uses gemini-2.5-flash, but that might not be available in all API versions
+    // Try using the model name that works with the current API version
+    // Based on error, v1beta API might not support newer models
+    // Use the most basic stable model name
+    const modelName = 'gemini-pro'; // Use the original stable model name
+    const model = genAI.getGenerativeModel({ model: modelName });
     console.log(`✅ Using Gemini model: ${modelName}`);
 
     // Build conversation context
