@@ -100,16 +100,32 @@ export async function POST(request: NextRequest) {
       });
     } catch (geminiError) {
       console.error('❌ [Chatbot] Gemini API error:', geminiError);
+      console.error('❌ [Chatbot] Gemini error details:', JSON.stringify(geminiError, null, 2));
       
       const errorMessage = geminiError instanceof Error ? geminiError.message : 'Unknown error';
+      const errorString = String(geminiError);
+      
+      // Check for specific Gemini API errors
+      let userMessage = "I'm having trouble processing your request right now. Please try again in a moment, or feel free to ask me about travel planning, destinations in the Philippines, or how to use the app features!";
+      
+      if (errorString.includes('API key') || errorMessage.includes('API key') || errorMessage.includes('auth')) {
+        userMessage = "The chatbot service is currently unavailable due to a configuration issue. Please try again later or contact support.";
+        console.error('❌ [Chatbot] API key or authentication error detected');
+      } else if (errorString.includes('quota') || errorMessage.includes('quota') || errorMessage.includes('limit')) {
+        userMessage = "The chatbot service has reached its usage limit. Please try again later.";
+        console.error('❌ [Chatbot] Quota limit reached');
+      } else if (errorString.includes('model') || errorMessage.includes('model')) {
+        userMessage = "The chatbot service is experiencing technical difficulties. Please try again in a few moments.";
+        console.error('❌ [Chatbot] Model error detected');
+      }
       
       // Provide fallback response if Gemini fails
       return NextResponse.json({
         success: false,
-        message: "I'm having trouble processing your request right now. Please try again in a moment, or feel free to ask me about travel planning, destinations in the Philippines, or how to use the app features!",
+        message: userMessage,
         error: errorMessage,
         timestamp: new Date().toISOString()
-      });
+      }, { status: 500 });
     }
   } catch (error) {
     console.error('❌ [Chatbot] API error:', error);
