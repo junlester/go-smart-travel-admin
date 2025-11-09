@@ -39,106 +39,157 @@ interface NotificationResults {
   email: NotificationResult | null;
 }
 
-// Initialize Firebase Admin SDK
-if (!getApps().length) {
-  let serviceAccount: any = null;
-  const path = require('path');
-  const fs = require('fs');
+// Lazy initialization of Firebase Admin SDK
+// Don't initialize during build time - only initialize when actually needed at runtime
+let messaging: ReturnType<typeof getMessaging> | null = null;
+let isInitialized = false;
+
+function initializeFirebaseAdmin() {
+  // Skip initialization during build time
+  // Check for Vercel build environment
+  const isBuildTime = process.env.NEXT_PHASE === 'phase-production-build' || 
+                      (process.env.NODE_ENV === 'production' && process.env.VERCEL_ENV !== 'production');
   
-  console.log('🔍 [Firebase Admin] Looking for service account file...');
-  console.log('   Current working directory:', process.cwd());
-  console.log('   __dirname:', __dirname);
-  
-  // Try multiple paths for service account file
-  const possiblePaths = [
-    path.join(process.cwd(), 'service-account.json'), // Current working directory
-    path.join(process.cwd(), '..', 'service-account.json'), // Parent directory (admin-panel)
-    path.join(__dirname, '..', '..', 'service-account.json'), // From src/utils to go-smart-travel-admin
-    path.join(__dirname, '..', '..', '..', 'service-account.json'), // From src/utils to admin-panel
-    path.resolve(process.cwd(), 'admin-panel', 'service-account.json'), // Absolute path
-    path.resolve(process.cwd(), 'service-account.json'), // Absolute from cwd
-  ];
-  
-  // Try to find and load service account file
-  for (const serviceAccountPath of possiblePaths) {
-    try {
-      const normalizedPath = path.normalize(serviceAccountPath);
-      console.log(`   🔍 Checking: ${normalizedPath}`);
-      if (fs.existsSync(normalizedPath)) {
-        console.log(`   ✅ File exists! Reading...`);
-        const fileContent = fs.readFileSync(normalizedPath, 'utf8');
-        serviceAccount = JSON.parse(fileContent);
-        
-        // Validate service account structure
-        if (!serviceAccount.private_key || !serviceAccount.client_email) {
-          console.error(`   ❌ Invalid service account file: missing required fields`);
-          serviceAccount = null;
-          continue;
-        }
-        
-        console.log(`   ✅ Successfully loaded service account from: ${normalizedPath}`);
-        break;
-      } else {
-        console.log(`   ❌ File does not exist`);
-      }
-    } catch (err: any) {
-      console.error(`   ❌ Error checking ${serviceAccountPath}: ${err.message}`);
-      // Continue to next path
-    }
+  if (isBuildTime) {
+    // During build, we don't have access to service account file
+    // Return null and let the functions handle it gracefully
+    console.log('⚠️ [Firebase Admin] Skipping initialization during build phase');
+    return null;
   }
-  
-  // Also try environment variables as fallback
-  if (!serviceAccount) {
-    console.log('⚠️ [Firebase Admin] Service account file not found, checking environment variables...');
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+
+  // Skip if already initialized
+  if (isInitialized && messaging) {
+    return messaging;
+  }
+
+  // Only initialize if not already initialized
+  if (!getApps().length) {
+    let serviceAccount: any = null;
+    const path = require('path');
+    const fs = require('fs');
+    
+    console.log('🔍 [Firebase Admin] Looking for service account file...');
+    console.log('   Current working directory:', process.cwd());
+    console.log('   __dirname:', __dirname);
+    
+    // Try multiple paths for service account file
+    const possiblePaths = [
+      path.join(process.cwd(), 'service-account.json'), // Current working directory
+      path.join(process.cwd(), '..', 'service-account.json'), // Parent directory (admin-panel)
+      path.join(__dirname, '..', '..', 'service-account.json'), // From src/utils to go-smart-travel-admin
+      path.join(__dirname, '..', '..', '..', 'service-account.json'), // From src/utils to admin-panel
+      path.resolve(process.cwd(), 'admin-panel', 'service-account.json'), // Absolute path
+      path.resolve(process.cwd(), 'service-account.json'), // Absolute from cwd
+    ];
+    
+    // Try to find and load service account file
+    for (const serviceAccountPath of possiblePaths) {
       try {
-        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        console.log('✅ Found service account in environment variable');
+        const normalizedPath = path.normalize(serviceAccountPath);
+        console.log(`   🔍 Checking: ${normalizedPath}`);
+        if (fs.existsSync(normalizedPath)) {
+          console.log(`   ✅ File exists! Reading...`);
+          const fileContent = fs.readFileSync(normalizedPath, 'utf8');
+          serviceAccount = JSON.parse(fileContent);
+          
+          // Validate service account structure
+          if (!serviceAccount.private_key || !serviceAccount.client_email) {
+            console.error(`   ❌ Invalid service account file: missing required fields`);
+            serviceAccount = null;
+            continue;
+          }
+          
+          console.log(`   ✅ Successfully loaded service account from: ${normalizedPath}`);
+          break;
+        } else {
+          console.log(`   ❌ File does not exist`);
+        }
       } catch (err: any) {
-        console.error('❌ Error parsing FIREBASE_SERVICE_ACCOUNT environment variable:', err.message);
+        console.error(`   ❌ Error checking ${serviceAccountPath}: ${err.message}`);
+        // Continue to next path
+      }
+    }
+    
+    // Also try environment variables as fallback
+    if (!serviceAccount) {
+      console.log('⚠️ [Firebase Admin] Service account file not found, checking environment variables...');
+      if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        try {
+          serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+          console.log('✅ Found service account in environment variable');
+        } catch (err: any) {
+          console.error('❌ Error parsing FIREBASE_SERVICE_ACCOUNT environment variable:', err.message);
+        }
+      } else {
+        console.log('   ❌ FIREBASE_SERVICE_ACCOUNT environment variable not set');
+      }
+    }
+    
+    if (serviceAccount) {
+      try {
+        console.log('🔧 [Firebase Admin] Initializing with service account credentials...');
+        initializeApp({
+          credential: cert(serviceAccount),
+          projectId: "go-smart-travel-app"
+        });
+        console.log('✅ [Firebase Admin] SDK initialized successfully with service account');
+        isInitialized = true;
+      } catch (initError: any) {
+        console.error('❌ [Firebase Admin] Error initializing with service account:', initError.message);
+        console.error('   Stack:', initError.stack);
+        // Don't throw during build - just log and return null
+        if (process.env.NEXT_PHASE === 'phase-production-build') {
+          console.warn('⚠️ [Firebase Admin] Skipping error during build phase');
+          return null;
+        }
+        throw initError;
       }
     } else {
-      console.log('   ❌ FIREBASE_SERVICE_ACCOUNT environment variable not set');
+      // During build, don't throw error - just return null
+      if (process.env.NEXT_PHASE === 'phase-production-build') {
+        console.warn('⚠️ [Firebase Admin] Service account not found during build - this is expected. It will be initialized at runtime.');
+        return null;
+      }
+      
+      console.error('\n❌ [Firebase Admin] Service account file not found in any of these locations:');
+      possiblePaths.forEach(p => {
+        try {
+          const normalized = path.normalize(p);
+          const exists = fs.existsSync(normalized);
+          console.error(`   ${exists ? '✅ EXISTS' : '❌ NOT FOUND'}: ${normalized}`);
+        } catch (e) {
+          console.error(`   ❌ ERROR: ${p}`);
+        }
+      });
+      console.error('\n💡 Solutions:');
+      console.error('   1. Copy service-account.json to admin-panel/go-smart-travel-admin/ folder');
+      console.error('   2. Copy service-account.json to admin-panel/ folder');
+      console.error('   3. Set FIREBASE_SERVICE_ACCOUNT environment variable with the JSON content');
+      
+      // Don't throw during build - just return null
+      console.warn('⚠️ [Firebase Admin] Service account not found - FCM features will not work until configured');
+      return null;
     }
   }
-  
-  if (serviceAccount) {
-    try {
-      console.log('🔧 [Firebase Admin] Initializing with service account credentials...');
-    initializeApp({
-      credential: cert(serviceAccount),
-      projectId: "go-smart-travel-app"
-    });
-      console.log('✅ [Firebase Admin] SDK initialized successfully with service account');
-    } catch (initError: any) {
-      console.error('❌ [Firebase Admin] Error initializing with service account:', initError.message);
-      console.error('   Stack:', initError.stack);
-      throw initError;
-    }
-  } else {
-    console.error('\n❌ [Firebase Admin] Service account file not found in any of these locations:');
-    possiblePaths.forEach(p => {
-      try {
-        const normalized = path.normalize(p);
-        const exists = fs.existsSync(normalized);
-        console.error(`   ${exists ? '✅ EXISTS' : '❌ NOT FOUND'}: ${normalized}`);
-      } catch (e) {
-        console.error(`   ❌ ERROR: ${p}`);
-      }
-    });
-    console.error('\n💡 Solutions:');
-    console.error('   1. Copy service-account.json to admin-panel/go-smart-travel-admin/ folder');
-    console.error('   2. Copy service-account.json to admin-panel/ folder');
-    console.error('   3. Set FIREBASE_SERVICE_ACCOUNT environment variable with the JSON content');
-    
-    // Don't fall through to default credentials - throw error instead
-    const error = new Error('Service account file not found. Please ensure service-account.json exists or set FIREBASE_SERVICE_ACCOUNT environment variable.');
-    console.error('\n❌ THROWING ERROR (not using default credentials):', error.message);
-    throw error;
+
+  // Get messaging instance
+  try {
+    messaging = getMessaging();
+    isInitialized = true;
+    return messaging;
+  } catch (error: any) {
+    console.error('❌ [Firebase Admin] Error getting messaging instance:', error.message);
+    return null;
   }
 }
 
-const messaging = getMessaging();
+// Get messaging instance (lazy initialization)
+function getMessagingInstance() {
+  if (!messaging) {
+    messaging = initializeFirebaseAdmin();
+  }
+  return messaging;
+}
 
 // Notification data interface
 export interface FCMNotificationData {
@@ -155,6 +206,20 @@ export interface FCMNotificationData {
  */
 export const sendNotificationToTokens = async (tokens: string[], notification: FCMNotificationData) => {
   try {
+    // Get messaging instance (lazy initialization)
+    const messagingInstance = getMessagingInstance();
+    
+    if (!messagingInstance) {
+      console.warn('⚠️ Firebase Admin SDK not initialized - FCM notifications disabled');
+      return {
+        success: false,
+        message: 'FCM service not available. Firebase Admin SDK not configured.',
+        successCount: 0,
+        failureCount: tokens.length,
+        responses: []
+      };
+    }
+    
     console.log(`📱 Sending FCM notification to ${tokens.length} tokens...`);
     
     const message: MulticastMessage = {
@@ -186,7 +251,7 @@ export const sendNotificationToTokens = async (tokens: string[], notification: F
       }
     };
 
-    const response = await messaging.sendEachForMulticast(message);
+    const response = await messagingInstance.sendEachForMulticast(message);
     
     console.log('📱 FCM notification sent:', response);
     console.log(`✅ Successfully sent: ${response.successCount}`);
