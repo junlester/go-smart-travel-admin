@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@types/js-cookie": "^3.0.6",
     "@types/nodemailer": "^7.0.2",
     "cloudinary": "^2.6.0",
