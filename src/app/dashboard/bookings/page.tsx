@@ -20,7 +20,7 @@ type Booking = {
   bookingDate: string;
   travelDate?: string;
   amount: string;
-  status: 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested';
+  status: 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested' | 'rejected';
   paymentStatus: 'paid' | 'partial' | 'unpaid' | 'refunded';
   paymentMethod?: string;
   paymentId?: string;
@@ -52,7 +52,7 @@ type Booking = {
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested' | 'rejected'>('all');
   const [filterPayment, setFilterPayment] = useState<'all' | 'paid' | 'partial' | 'unpaid'>('all');
   const [loading, setLoading] = useState(true);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -176,7 +176,7 @@ export default function BookingsPage() {
   };
 
   // Update booking status
-  const updateBookingStatus = async (id: string, newStatus: 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested') => {
+  const updateBookingStatus = async (id: string, newStatus: 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested' | 'rejected') => {
     try {
       // Check if we have a valid ID
       if (!id) {
@@ -241,15 +241,31 @@ export default function BookingsPage() {
         console.log('Firestore update completed successfully');
         
         // Add notification for user
-        if (newStatus === 'confirmed' || newStatus === 'cancelled') {
+        if (newStatus === 'confirmed' || newStatus === 'cancelled' || newStatus === 'rejected') {
           try {
+            let notificationTitle = '';
+            let notificationMessage = '';
+            let notificationType = '';
+            
+            if (newStatus === 'confirmed') {
+              notificationTitle = 'Booking Confirmed';
+              notificationMessage = `Your booking for ${bookingData.tourName} has been confirmed!`;
+              notificationType = 'booking_confirmed';
+            } else if (newStatus === 'cancelled') {
+              notificationTitle = 'Booking Cancelled';
+              notificationMessage = `Your booking for ${bookingData.tourName} has been cancelled.`;
+              notificationType = 'booking_cancelled';
+            } else if (newStatus === 'rejected') {
+              notificationTitle = 'Booking Rejected';
+              notificationMessage = `Your booking for ${bookingData.tourName} has been rejected. Please contact support for more information.`;
+              notificationType = 'booking_rejected';
+            }
+            
             const notificationData = {
               userId: bookingData.userId,
-              title: newStatus === 'confirmed' ? 'Booking Confirmed' : 'Booking Cancelled',
-              message: newStatus === 'confirmed' 
-                ? `Your booking for ${bookingData.tourName} has been confirmed!` 
-                : `Your booking for ${bookingData.tourName} has been cancelled.`,
-              type: newStatus === 'confirmed' ? 'booking_confirmed' : 'booking_cancelled',
+              title: notificationTitle,
+              message: notificationMessage,
+              type: notificationType,
               isRead: false,
               createdAt: serverTimestamp(),
               bookingId: id
@@ -306,7 +322,7 @@ export default function BookingsPage() {
           // Continue even if activity creation fails
         }
         
-        alert(`Booking ${newStatus} successfully. ${(newStatus === 'confirmed' || newStatus === 'cancelled') ? 'User has been notified.' : ''}`);
+        alert(`Booking ${newStatus} successfully. ${(newStatus === 'confirmed' || newStatus === 'cancelled' || newStatus === 'rejected') ? 'User has been notified.' : ''}`);
       } catch (updateError) {
         console.error('Error in Firestore update operation:', updateError);
         
@@ -477,6 +493,100 @@ export default function BookingsPage() {
     }
   };
 
+  // Function to send booking confirmation email (one-click, no input needed)
+  const sendBookingConfirmationEmail = async () => {
+    if (!selectedBooking) {
+      toast.error('No booking selected');
+      return;
+    }
+
+    if (!selectedBooking.userEmail) {
+      toast.error('User email not available. Cannot send email notification.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Generate automatic booking confirmation email content
+      const emailTitle = `✅ Booking Confirmed: ${selectedBooking.tourName}`;
+      const emailMessage = `
+Hello ${selectedBooking.userName},
+
+We are pleased to confirm that your booking has been confirmed!
+
+Booking Details:
+- Tour: ${selectedBooking.tourName}
+- Booking ID: ${selectedBooking.id.substring(0, 8).toUpperCase()}
+- Travel Date: ${selectedBooking.travelDate || 'To be determined'}
+- Number of People: ${selectedBooking.numberOfPeople}
+- Total Amount: ₱${parseFloat(selectedBooking.amount || '0').toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })}
+- Payment Status: ${selectedBooking.paymentStatus === 'paid' ? 'Paid' : 'Pending'}
+
+Your booking is now confirmed and ready! We look forward to providing you with an amazing travel experience.
+
+If you have any questions or need assistance, please don't hesitate to contact us.
+
+Thank you for choosing Go Smart Travel!
+
+Best regards,
+Go Smart Travel Team
+      `.trim();
+
+      console.log('📧 Sending booking confirmation email to:', selectedBooking.userEmail);
+
+      // Send email via API
+      const emailResponse = await fetch('/api/notifications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'booking_confirmation',
+          data: {
+            emails: [selectedBooking.userEmail],
+            title: emailTitle,
+            message: emailMessage,
+            bookingId: selectedBooking.id,
+            userName: selectedBooking.userName,
+            tourName: selectedBooking.tourName,
+            travelDate: selectedBooking.travelDate,
+            amount: selectedBooking.amount,
+            numberOfPeople: selectedBooking.numberOfPeople
+          }
+        }),
+      });
+
+      if (!emailResponse.ok) {
+        const errorData = await emailResponse.json();
+        throw new Error(errorData.error || 'Failed to send email');
+      }
+
+      const emailResult = await emailResponse.json();
+      console.log('✅ Email sent successfully:', emailResult);
+
+      // Add activity log
+      await addDoc(collection(db, 'activities'), {
+        title: 'Booking Confirmation Email Sent',
+        description: `Admin sent booking confirmation email to ${selectedBooking.userName} for booking ${selectedBooking.tourName}`,
+        timestamp: serverTimestamp(),
+        type: 'notification',
+        bookingId: selectedBooking.id
+      });
+
+      toast.success('✅ Booking confirmation email sent successfully!');
+      
+    } catch (error: any) {
+      console.error('❌ Error sending booking confirmation email:', error);
+      toast.error(`Failed to send email: ${error.message || 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Function to send notification to user
   const sendNotification = async () => {
     if (!selectedBooking || !notificationTitle.trim() || !notificationMessage.trim()) {
@@ -594,9 +704,11 @@ export default function BookingsPage() {
       }
       
       // I-record ang activity
+      const bookingToDelete = bookings.find(b => b.id === id);
+      const statusType = bookingToDelete?.status === 'rejected' ? 'rejected' : 'cancelled';
       await addDoc(collection(db, 'activities'), {
         title: 'Booking Deleted',
-        description: `A cancelled booking was permanently deleted from the system.`,
+        description: `A ${statusType} booking was permanently deleted from the system.`,
         timestamp: serverTimestamp(),
         type: 'booking_deleted'
       });
@@ -722,13 +834,14 @@ export default function BookingsPage() {
             <select
             className="px-4 py-2 rounded-md bg-white border border-gray-300 text-black"
               value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as 'all' | 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested')}
+            onChange={(e) => setFilterStatus(e.target.value as 'all' | 'confirmed' | 'pending' | 'cancelled' | 'cancellation_requested' | 'rejected')}
             >
             <option value="all">All Status</option>
               <option value="confirmed">Confirmed</option>
               <option value="pending">Pending</option>
             <option value="cancellation_requested">Cancellation Requested</option>
               <option value="cancelled">Cancelled</option>
+              <option value="rejected">Rejected</option>
             </select>
           </div>
         </div>
@@ -815,12 +928,14 @@ export default function BookingsPage() {
                           booking.status === 'pending' ? 'bg-yellow-900 text-yellow-300' : 
                           booking.status === 'cancelled' ? 'bg-red-900 text-red-300' : 
                           booking.status === 'cancellation_requested' ? 'bg-orange-900 text-orange-300' :
+                          booking.status === 'rejected' ? 'bg-red-800 text-red-200' :
                           'bg-blue-900 text-blue-300'
                         }`}>
                           {booking.status === 'confirmed' ? 'Confirmed' : 
                           booking.status === 'pending' ? 'Pending' : 
                           booking.status === 'cancelled' ? 'Cancelled' :
                           booking.status === 'cancellation_requested' ? 'Cancellation Requested' :
+                          booking.status === 'rejected' ? 'Rejected' :
                           (booking.status as string).charAt(0).toUpperCase() + (booking.status as string).slice(1)}
                           </span>
                         </td>
@@ -837,12 +952,24 @@ export default function BookingsPage() {
                           View
                         </button>
                         {booking.status === 'pending' && (
+                          <>
                               <button 
                                 onClick={() => updateBookingStatus(booking.id, 'confirmed')}
                             className="text-green-400 hover:text-green-300 mr-2"
                               >
                                 Confirm
                               </button>
+                              <button 
+                                onClick={() => {
+                                  if (confirm('Are you sure you want to reject this booking?')) {
+                                    updateBookingStatus(booking.id, 'rejected');
+                                  }
+                                }}
+                            className="text-red-400 hover:text-red-300 mr-2"
+                              >
+                                Reject
+                              </button>
+                          </>
                             )}
                         {booking.status === 'cancellation_requested' && (
                               <button 
@@ -853,6 +980,14 @@ export default function BookingsPage() {
                               </button>
                             )}
                         {booking.status === 'cancelled' && (
+                              <button 
+                            onClick={() => deleteBooking(booking.id)}
+                            className="text-red-400 hover:text-red-300"
+                              >
+                            Delete
+                              </button>
+                            )}
+                        {booking.status === 'rejected' && (
                               <button 
                             onClick={() => deleteBooking(booking.id)}
                             className="text-red-400 hover:text-red-300"
@@ -921,12 +1056,14 @@ export default function BookingsPage() {
                     selectedBooking.status === 'pending' ? 'bg-yellow-900 text-yellow-300' : 
                     selectedBooking.status === 'cancelled' ? 'bg-red-900 text-red-300' : 
                     selectedBooking.status === 'cancellation_requested' ? 'bg-orange-900 text-orange-300' :
+                    selectedBooking.status === 'rejected' ? 'bg-red-800 text-red-200' :
                     'bg-blue-900 text-blue-300'
                   }`}>
                     {selectedBooking.status === 'confirmed' ? 'Confirmed' : 
                     selectedBooking.status === 'pending' ? 'Pending' : 
                     selectedBooking.status === 'cancelled' ? 'Cancelled' :
                     selectedBooking.status === 'cancellation_requested' ? 'Cancellation Requested' :
+                    selectedBooking.status === 'rejected' ? 'Rejected' :
                     (selectedBooking.status as string).charAt(0).toUpperCase() + (selectedBooking.status as string).slice(1)}
                   </span>
                   
@@ -1064,23 +1201,52 @@ export default function BookingsPage() {
               
               <div className="mt-6 border-t border-gray-300 pt-4">
                 <div className="flex justify-between items-center">
-                  <button
-                    onClick={openNotificationModal}
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-gray-900 rounded-md flex items-center"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5zM4.828 7l2.586 2.586a2 2 0 002.828 0L12.828 7H4.828zM4.828 17h8l-2.586-2.586a2 2 0 00-2.828 0L4.828 17z" />
-                    </svg>
-                    Send Notification
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={sendBookingConfirmationEmail}
+                      disabled={!selectedBooking.userEmail || loading}
+                      className={`px-4 py-2 rounded-md flex items-center ${
+                        !selectedBooking.userEmail || loading
+                          ? 'bg-gray-400 cursor-not-allowed text-gray-600'
+                          : 'bg-green-600 hover:bg-green-700 text-white'
+                      }`}
+                      title={!selectedBooking.userEmail ? 'User email not available' : 'Send booking confirmation email'}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      {loading ? 'Sending...' : 'Send Notification'}
+                    </button>
+                    <button
+                      onClick={openNotificationModal}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md flex items-center"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5zM4.828 7l2.586 2.586a2 2 0 002.828 0L12.828 7H4.828zM4.828 17h8l-2.586-2.586a2 2 0 00-2.828 0L4.828 17z" />
+                      </svg>
+                      Custom Notification
+                    </button>
+                  </div>
                   <div className="flex space-x-2">
                     {selectedBooking.status === 'pending' && (
-                      <button
-                        onClick={() => updateBookingStatus(selectedBooking.id, 'confirmed')}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-gray-900 rounded-md"
-                      >
-                        Confirm Booking
-                      </button>
+                      <>
+                        <button
+                          onClick={() => updateBookingStatus(selectedBooking.id, 'confirmed')}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-gray-900 rounded-md"
+                        >
+                          Confirm Booking
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm('Are you sure you want to reject this booking?')) {
+                              updateBookingStatus(selectedBooking.id, 'rejected');
+                            }
+                          }}
+                          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-gray-900 rounded-md"
+                        >
+                          Reject Booking
+                        </button>
+                      </>
                     )}
                     {selectedBooking.status === 'cancellation_requested' && (
                       <>
@@ -1099,6 +1265,14 @@ export default function BookingsPage() {
                       </>
                     )}
                     {selectedBooking.status === 'cancelled' && (
+                      <button
+                        onClick={() => deleteBooking(selectedBooking.id)}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-gray-900 rounded-md"
+                      >
+                        Delete Booking
+                      </button>
+                    )}
+                    {selectedBooking.status === 'rejected' && (
                       <button
                         onClick={() => deleteBooking(selectedBooking.id)}
                         className="px-4 py-2 bg-red-600 hover:bg-red-700 text-gray-900 rounded-md"

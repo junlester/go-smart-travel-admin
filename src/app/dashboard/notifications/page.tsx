@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { db } from '@/configs/firebase';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 // Remove direct OneSignal imports - we'll use API routes instead
 
 interface NotificationForm {
@@ -10,16 +12,8 @@ interface NotificationForm {
   sendSMS: boolean;
 }
 
-interface SegmentForm {
-  segments: string[];
-  title: string;
-  message: string;
-  sendEmail: boolean;
-  sendSMS: boolean;
-}
-
 export default function NotificationsPage() {
-  const [activeTab, setActiveTab] = useState<'broadcast' | 'segments' | 'templates'>('broadcast');
+  const [activeTab, setActiveTab] = useState<'broadcast' | 'templates'>('broadcast');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
 
@@ -31,36 +25,23 @@ export default function NotificationsPage() {
     sendSMS: false
   });
 
-  const [segmentForm, setSegmentForm] = useState<SegmentForm>({
-    segments: [],
-    title: '',
-    message: '',
-    sendEmail: false,
-    sendSMS: false
-  });
-
   // Template forms
   const [tripReminderForm, setTripReminderForm] = useState({
     destination: '',
     startDate: '',
-    tripId: ''
+    userName: '',
+    userId: ''
   });
 
-  const [weatherAlertForm, setWeatherAlertForm] = useState({
-    location: '',
-    condition: '',
-    temperature: '',
-    advice: ''
-  });
+  // User search states
+  const [userSearchText, setUserSearchText] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [userBookings, setUserBookings] = useState<any[]>([]);
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [noBookingsError, setNoBookingsError] = useState('');
 
-  const [promoForm, setPromoForm] = useState({
-    segments: [] as string[],
-    title: '',
-    message: '',
-    promoCode: '',
-    discount: '',
-    destination: ''
-  });
 
   const handleBroadcastSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,37 +86,143 @@ export default function NotificationsPage() {
     setLoading(false);
   };
 
-  const handleSegmentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const response = await fetch('/api/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type: 'segments',
-          data: {
-            segments: segmentForm.segments,
-            title: segmentForm.title,
-            message: segmentForm.message,
-            sendEmail: segmentForm.sendEmail,
-            sendSMS: segmentForm.sendSMS
+  // Search users as they type
+  useEffect(() => {
+    const searchUsers = async () => {
+      if (userSearchText.length < 1) {
+        setUserSearchResults([]);
+        return;
+      }
+
+      setUserSearchLoading(true);
+      try {
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        const results: any[] = [];
+        const searchLower = userSearchText.toLowerCase();
+
+        usersSnapshot.forEach((doc) => {
+          const userData = doc.data();
+          const displayName = userData.displayName || '';
+          const email = userData.email || '';
+          
+          // Skip admin users
+          const isAdmin = userData.role === 'admin' || 
+                         email.toLowerCase() === 'admin@gosmarttravel.com';
+          
+          if (isAdmin) return;
+
+          // Match by name or email
+          if (displayName.toLowerCase().includes(searchLower) || 
+              email.toLowerCase().includes(searchLower)) {
+            results.push({
+              id: doc.id,
+              displayName: displayName || email,
+              email: email,
+              ...userData
+            });
           }
-        })
-      });
+        });
+
+        setUserSearchResults(results);
+      } catch (error) {
+        console.error('Error searching users:', error);
+      } finally {
+        setUserSearchLoading(false);
+      }
+    };
+
+    const timeoutId = setTimeout(searchUsers, 300);
+    return () => clearTimeout(timeoutId);
+  }, [userSearchText]);
+
+  // Fetch user bookings when user is selected
+  const fetchUserBookings = async (userId: string) => {
+    setBookingLoading(true);
+    setNoBookingsError('');
+    try {
+      const bookingsQuery = query(
+        collection(db, 'bookings'),
+        where('userId', '==', userId),
+        where('paymentStatus', '==', 'paid')
+      );
       
-      const result = await response.json();
-      setResult(result);
+      const bookingsSnapshot = await getDocs(bookingsQuery);
+      const bookings: any[] = [];
+
+      bookingsSnapshot.forEach((doc) => {
+        const bookingData = doc.data();
+        bookings.push({
+          id: doc.id,
+          ...bookingData
+        });
+      });
+
+      // Sort by travel date (upcoming first)
+      bookings.sort((a, b) => {
+        const dateA = a.travelDate?.toDate ? a.travelDate.toDate() : new Date(a.travelDate || 0);
+        const dateB = b.travelDate?.toDate ? b.travelDate.toDate() : new Date(b.travelDate || 0);
+        return dateA.getTime() - dateB.getTime();
+      });
+
+      setUserBookings(bookings);
+
+      if (bookings.length === 0) {
+        setNoBookingsError('User does not book a tour');
+        setTripReminderForm(prev => ({
+          ...prev,
+          destination: '',
+          startDate: ''
+        }));
+      } else {
+        // Auto-populate with first upcoming booking
+        const firstBooking = bookings[0];
+        const travelDate = firstBooking.travelDate?.toDate ? 
+          firstBooking.travelDate.toDate() : 
+          new Date(firstBooking.travelDate);
+        
+        const formattedDate = travelDate.toISOString().split('T')[0];
+        
+        setTripReminderForm(prev => ({
+          ...prev,
+          destination: firstBooking.tourLocation || firstBooking.tourName || '',
+          startDate: formattedDate
+        }));
+        setNoBookingsError('');
+      }
     } catch (error) {
-      setResult({ error: error.message });
+      console.error('Error fetching user bookings:', error);
+      setNoBookingsError('Error fetching bookings');
+    } finally {
+      setBookingLoading(false);
     }
-    setLoading(false);
+  };
+
+  // Handle user selection
+  const handleUserSelect = (user: any) => {
+    setSelectedUser(user);
+    setUserSearchText(user.displayName || user.email);
+    setUserSearchResults([]);
+    setTripReminderForm(prev => ({
+      ...prev,
+      userName: user.displayName || user.email,
+      userId: user.id
+    }));
+    fetchUserBookings(user.id);
   };
 
   const handleTripReminder = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (noBookingsError) {
+      setResult({ error: noBookingsError });
+      return;
+    }
+
+    if (!tripReminderForm.destination || !tripReminderForm.startDate) {
+      setResult({ error: 'Please select a user with a booking' });
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch('/api/notifications', {
@@ -149,7 +236,7 @@ export default function NotificationsPage() {
             tripData: {
               destination: tripReminderForm.destination,
               startDate: tripReminderForm.startDate,
-              tripId: tripReminderForm.tripId
+              userName: tripReminderForm.userName
             }
           }
         })
@@ -157,74 +244,12 @@ export default function NotificationsPage() {
       
       const result = await response.json();
       setResult(result);
-    } catch (error) {
+    } catch (error: any) {
       setResult({ error: error.message });
     }
     setLoading(false);
   };
 
-  const handleWeatherAlert = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const response = await fetch('/api/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type: 'weather_alert',
-          data: {
-            weatherData: {
-              location: weatherAlertForm.location,
-              condition: weatherAlertForm.condition,
-              temperature: weatherAlertForm.temperature,
-              advice: weatherAlertForm.advice
-            }
-          }
-        })
-      });
-      
-      const result = await response.json();
-      setResult(result);
-    } catch (error) {
-      setResult({ error: error.message });
-    }
-    setLoading(false);
-  };
-
-  const handlePromoNotification = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const response = await fetch('/api/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          type: 'promotional',
-          data: {
-            segments: promoForm.segments,
-            sendSMS: true, // Always send SMS for promotional notifications
-            promoData: {
-              title: promoForm.title,
-              message: promoForm.message,
-              promoCode: promoForm.promoCode,
-              discount: promoForm.discount,
-              destination: promoForm.destination
-            }
-          }
-        })
-      });
-      
-      const result = await response.json();
-      setResult(result);
-    } catch (error) {
-      setResult({ error: error.message });
-    }
-    setLoading(false);
-  };
 
   return (
     <div>
@@ -239,7 +264,6 @@ export default function NotificationsPage() {
           <nav className="-mb-px flex space-x-8">
             {[
               { id: 'broadcast', name: 'Broadcast to All', icon: '📢' },
-              { id: 'segments', name: 'Target Segments', icon: '🎯' },
               { id: 'templates', name: 'Templates', icon: '📝' }
             ].map((tab) => (
               <button
@@ -340,110 +364,6 @@ export default function NotificationsPage() {
         </div>
       )}
 
-      {/* Target Segments */}
-      {activeTab === 'segments' && (
-        <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-300">
-          <h2 className="text-xl font-semibold mb-6 text-gray-900 flex items-center">
-            <span className="text-2xl mr-2">🎯</span>
-            Target User Segments
-          </h2>
-          <form onSubmit={handleSegmentSubmit} className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">Target Segments</label>
-              <div className="grid grid-cols-2 gap-3">
-                {['All', 'Premium Users', 'Beach Lovers', 'City Explorers', 'Adventure Seekers'].map((segment) => (
-                  <label key={segment} className="flex items-center p-3 bg-gray-100 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={segmentForm.segments.includes(segment)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSegmentForm({...segmentForm, segments: [...segmentForm.segments, segment]});
-                        } else {
-                          setSegmentForm({...segmentForm, segments: segmentForm.segments.filter(s => s !== segment)});
-                        }
-                      }}
-                      className="mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                    />
-                    <span className="text-gray-700 font-medium">{segment}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
-              <input
-                type="text"
-                value={segmentForm.title}
-                onChange={(e) => setSegmentForm({...segmentForm, title: e.target.value})}
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                placeholder="Enter notification title"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Message</label>
-              <textarea
-                value={segmentForm.message}
-                onChange={(e) => setSegmentForm({...segmentForm, message: e.target.value})}
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all resize-none"
-                rows={4}
-                placeholder="Enter notification message"
-                required
-              />
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center p-4 bg-gray-100 rounded-lg">
-                <input
-                  type="checkbox"
-                  id="segment-send-email"
-                  checked={segmentForm.sendEmail}
-                  onChange={(e) => setSegmentForm({...segmentForm, sendEmail: e.target.checked})}
-                  className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                />
-                <label htmlFor="segment-send-email" className="text-sm font-medium text-gray-700 flex items-center">
-                  <span className="text-lg mr-2">📧</span>
-                  Also send email notifications
-                </label>
-              </div>
-              <div className="flex items-center p-4 bg-gray-100 rounded-lg">
-                <input
-                  type="checkbox"
-                  id="segment-send-sms"
-                  checked={segmentForm.sendSMS}
-                  onChange={(e) => setSegmentForm({...segmentForm, sendSMS: e.target.checked})}
-                  className="mr-3 h-5 w-5 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                />
-                <label htmlFor="segment-send-sms" className="text-sm font-medium text-gray-700 flex items-center">
-                  <span className="text-lg mr-2">📱</span>
-                  Also send SMS notifications
-                </label>
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled={loading || segmentForm.segments.length === 0}
-              className="w-full bg-green-600 hover:bg-green-700 text-gray-900 py-3 px-6 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <span className="text-xl mr-2">🎯</span>
-                  Send to Segments
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      )}
-
       {/* Templates */}
       {activeTab === 'templates' && (
         <div className="space-y-6">
@@ -454,16 +374,76 @@ export default function NotificationsPage() {
               Trip Reminder
             </h3>
             <form onSubmit={handleTripReminder} className="space-y-4">
+              {/* User Search */}
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-2">User's Name</label>
+                <input
+                  type="text"
+                  value={userSearchText}
+                  onChange={(e) => {
+                    setUserSearchText(e.target.value);
+                    if (!e.target.value) {
+                      setSelectedUser(null);
+                      setTripReminderForm(prev => ({
+                        ...prev,
+                        userName: '',
+                        userId: '',
+                        destination: '',
+                        startDate: ''
+                      }));
+                      setNoBookingsError('');
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
+                  placeholder="Type to search users (e.g., John Doe)"
+                  required
+                />
+                {/* Search Results Dropdown */}
+                {userSearchResults.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    {userSearchLoading ? (
+                      <div className="p-3 text-center text-gray-500">Searching...</div>
+                    ) : (
+                      userSearchResults.map((user) => (
+                        <button
+                          key={user.id}
+                          type="button"
+                          onClick={() => handleUserSelect(user)}
+                          className="w-full text-left px-4 py-2 hover:bg-gray-100 transition-colors border-b border-gray-200 last:border-b-0"
+                        >
+                          <div className="font-medium text-gray-900">{user.displayName}</div>
+                          <div className="text-sm text-gray-500">{user.email}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Loading indicator for bookings */}
+              {bookingLoading && (
+                <div className="text-center text-gray-500 py-2">
+                  Loading user bookings...
+                </div>
+              )}
+
+              {/* Error message if no bookings */}
+              {noBookingsError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-red-600 font-medium">{noBookingsError}</p>
+                </div>
+              )}
+
+              {/* Destination and Start Date (Read-only) */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Destination</label>
                   <input
                     type="text"
                     value={tripReminderForm.destination}
-                    onChange={(e) => setTripReminderForm({...tripReminderForm, destination: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="Boracay"
-                    required
+                    readOnly
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-200 text-gray-700 cursor-not-allowed"
+                    placeholder="Auto-filled from booking"
                   />
                 </div>
                 <div>
@@ -471,22 +451,10 @@ export default function NotificationsPage() {
                   <input
                     type="date"
                     value={tripReminderForm.startDate}
-                    onChange={(e) => setTripReminderForm({...tripReminderForm, startDate: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    required
+                    readOnly
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-200 text-gray-700 cursor-not-allowed"
                   />
                 </div>
-                </div>
-                <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Trip ID</label>
-                  <input
-                    type="text"
-                    value={tripReminderForm.tripId}
-                    onChange={(e) => setTripReminderForm({...tripReminderForm, tripId: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="trip_123"
-                    required
-                  />
               </div>
               <button
                 type="submit"
@@ -511,260 +479,36 @@ export default function NotificationsPage() {
             </form>
           </div>
 
-          {/* Weather Alert */}
-          <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-300">
-            <h3 className="text-lg font-semibold mb-6 text-gray-900 flex items-center">
-              <span className="text-2xl mr-2">🌤️</span>
-              Weather Alert
-            </h3>
-            <form onSubmit={handleWeatherAlert} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
-                  <input
-                    type="text"
-                    value={weatherAlertForm.location}
-                    onChange={(e) => setWeatherAlertForm({...weatherAlertForm, location: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="Boracay"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Condition</label>
-                  <input
-                    type="text"
-                    value={weatherAlertForm.condition}
-                    onChange={(e) => setWeatherAlertForm({...weatherAlertForm, condition: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="Sunny"
-                    required
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Temperature</label>
-                  <input
-                    type="text"
-                    value={weatherAlertForm.temperature}
-                    onChange={(e) => setWeatherAlertForm({...weatherAlertForm, temperature: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="28°C"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Advice</label>
-                  <input
-                    type="text"
-                    value={weatherAlertForm.advice}
-                    onChange={(e) => setWeatherAlertForm({...weatherAlertForm, advice: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="Perfect for beach activities!"
-                    required
-                  />
-                </div>
-              </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-gray-900 py-3 px-6 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <span className="text-xl mr-2">🌤️</span>
-                    Send Weather Alert
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
-
-          {/* Promotional Notification */}
-          <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-300">
-            <h3 className="text-lg font-semibold mb-6 text-gray-900 flex items-center">
-              <span className="text-2xl mr-2">🎉</span>
-              Promotional Notification
-            </h3>
-            <form onSubmit={handlePromoNotification} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3">Target Segments</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {['All', 'Premium Users', 'Beach Lovers', 'City Explorers'].map((segment) => (
-                    <label key={segment} className="flex items-center p-3 bg-gray-100 rounded-lg hover:bg-gray-600 transition-colors cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={promoForm.segments.includes(segment)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setPromoForm({...promoForm, segments: [...promoForm.segments, segment]});
-                          } else {
-                            setPromoForm({...promoForm, segments: promoForm.segments.filter(s => s !== segment)});
-                          }
-                        }}
-                        className="mr-3 h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                      />
-                      <span className="text-gray-700 font-medium">{segment}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
-                  <input
-                    type="text"
-                    value={promoForm.title}
-                    onChange={(e) => setPromoForm({...promoForm, title: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="🎉 Special Offer!"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Destination</label>
-                  <input
-                    type="text"
-                    value={promoForm.destination}
-                    onChange={(e) => setPromoForm({...promoForm, destination: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="Boracay"
-                    required
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Message</label>
-                <textarea
-                  value={promoForm.message}
-                  onChange={(e) => setPromoForm({...promoForm, message: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all resize-none"
-                  rows={3}
-                  placeholder="Get 20% off your next trip to Boracay!"
-                  required
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Promo Code</label>
-                  <input
-                    type="text"
-                    value={promoForm.promoCode}
-                    onChange={(e) => setPromoForm({...promoForm, promoCode: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="BORACAY20"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Discount</label>
-                  <input
-                    type="text"
-                    value={promoForm.discount}
-                    onChange={(e) => setPromoForm({...promoForm, discount: e.target.value})}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
-                    placeholder="20%"
-                    required
-                  />
-                </div>
-              </div>
-              <button
-                type="submit"
-                disabled={loading || promoForm.segments.length === 0}
-                className="w-full bg-pink-600 hover:bg-pink-700 text-gray-900 py-3 px-6 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <span className="text-xl mr-2">🎉</span>
-                    Send Promotional Notification
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
         </div>
       )}
 
       {/* Result Display */}
       {result && (
         <div className={`mt-6 rounded-lg p-6 border ${result.success ? 'bg-green-900 bg-opacity-20 border-green-700' : 'bg-red-900 bg-opacity-20 border-red-700'}`}>
-          <h3 className={`text-lg font-semibold mb-4 flex items-center ${result.success ? 'text-green-400' : 'text-red-400'}`}>
-            <span className="text-2xl mr-2">{result.success ? '✅' : '❌'}</span>
-            {result.success ? 'Notification Sent Successfully!' : 'Failed to Send Notification'}
-          </h3>
           {result.success ? (
-            <div>
-              {result.data?.emailSkipped ? (
-                <div className="bg-yellow-800 bg-opacity-30 p-4 rounded-lg mb-4 border border-yellow-700">
-                  <p className="text-yellow-300 font-medium mb-2">⚠️ Email Sending Disabled</p>
-                  <p className="text-yellow-200 text-sm mb-2">
-                    Email notifications are disabled in OneSignal. Notification was sent via Push and SMS only.
-                  </p>
-                  <p className="text-yellow-300 text-sm">
-                    To enable email, contact OneSignal Support or configure email in OneSignal Dashboard.
-                  </p>
-                </div>
-              ) : null}
-              <p className="text-green-300 mb-4 text-lg">
-                {broadcastForm.sendSMS || segmentForm.sendSMS 
-                  ? result.data?.emailSkipped
-                    ? '📱 Your notification has been sent via Push and SMS!'
-                    : '📱 Your notification has been sent via Push, Email, and SMS!'
-                  : '📱 Your notification has been sent to users\' phones!'}
-              </p>
-              <div className="bg-green-800 bg-opacity-30 p-4 rounded-lg mb-4">
-                <p className="text-green-300 font-medium mb-2">📊 Notification Details:</p>
-                <div className="space-y-1">
-                  <p className="text-green-200">• Notification ID: {result.data?.id || result.id || 'N/A'}</p>
-                  <p className="text-green-200">• Recipients: {result.data?.recipients || result.recipients || 'All users'}</p>
-                  <p className="text-green-200">• Channels: {
-                    result.data?.emailSkipped
-                      ? 'Push + SMS (Email skipped)'
-                      : broadcastForm.sendSMS || segmentForm.sendSMS 
-                        ? 'Push + Email + SMS' 
-                        : 'Push Notification'
-                  }</p>
-                  <p className="text-green-200">• Status: {result.data?.success !== false ? 'Delivered' : 'Pending'}</p>
-                </div>
-              </div>
-              <details className="mt-4">
-                <summary className="cursor-pointer text-sm text-green-400 hover:text-green-300">View Full Response</summary>
-                <pre className="text-xs text-gray-700 overflow-auto mt-2 bg-white p-3 rounded">
-                  {JSON.stringify(result.data, null, 2)}
-                </pre>
-              </details>
-            </div>
+            <p className="text-green-300 text-lg">
+              ✅ Notification Sent Successfully!
+            </p>
           ) : (
-            <div>
-              <p className="text-red-300 mb-4 text-lg">❌ Failed to send notification. Check the details below:</p>
-              <div className="bg-red-800 bg-opacity-30 p-4 rounded-lg mb-4">
-                <p className="text-red-300 font-medium mb-2">Error Details:</p>
-                <p className="text-red-200">{result.error}</p>
+            <>
+              <h3 className="text-lg font-semibold mb-4 flex items-center text-red-400">
+                <span className="text-2xl mr-2">❌</span>
+                Failed to Send Notification
+              </h3>
+              <div>
+                <p className="text-red-300 mb-4 text-lg">❌ Failed to send notification. Check the details below:</p>
+                <div className="bg-red-800 bg-opacity-30 p-4 rounded-lg mb-4">
+                  <p className="text-red-300 font-medium mb-2">Error Details:</p>
+                  <p className="text-red-200">{result.error}</p>
+                </div>
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-sm text-red-400 hover:text-red-300">View Full Error</summary>
+                  <pre className="text-xs text-gray-700 overflow-auto mt-2 bg-white p-3 rounded">
+                    {JSON.stringify(result, null, 2)}
+                  </pre>
+                </details>
               </div>
-              <details className="mt-4">
-                <summary className="cursor-pointer text-sm text-red-400 hover:text-red-300">View Full Error</summary>
-                <pre className="text-xs text-gray-700 overflow-auto mt-2 bg-white p-3 rounded">
-                  {JSON.stringify(result, null, 2)}
-                </pre>
-              </details>
-            </div>
+            </>
           )}
         </div>
       )}

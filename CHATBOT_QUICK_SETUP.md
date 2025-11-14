@@ -137,3 +137,4 @@ The mobile app uses `chatbotConfig.js` to configure the API URL:
 
 **Ready to use!** After completing these steps, your chatbot will be powered by Gemini AI.
 
+

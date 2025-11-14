@@ -52,20 +52,11 @@ const StatCard = ({
     </div>
         </div>
         
-        {/* Title, Value, and Percentage */}
+        {/* Title, Value */}
         <div className="flex-1">
           <p className="text-sm text-gray-600 mb-1">{title}</p>
           <div className="flex items-center gap-3">
             <p className="text-3xl font-bold text-gray-900">{value}</p>
-            {percentage !== null && percentage !== undefined && (
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                percentage.isPositive 
-                  ? 'bg-blue-100 text-blue-700' 
-                  : 'bg-red-100 text-red-700'
-              }`}>
-                {percentage.isPositive ? '+' : '-'}{percentage.value.toFixed(2)}%
-              </span>
-            )}
           </div>
         </div>
     </div>
@@ -243,7 +234,7 @@ export default function DashboardPage() {
           }
         });
         
-        // Fetch booking count and revenue
+        // Fetch booking count and revenue - only count paid bookings for revenue
         const allBookingsSnapshot = await getDocs(collection(db, 'bookings'));
         const bookingCount = allBookingsSnapshot.size;
         let totalRevenue = 0;
@@ -254,17 +245,29 @@ export default function DashboardPage() {
         
         allBookingsSnapshot.forEach((doc) => {
           const booking = doc.data();
+          // Only count revenue for paid bookings (based on Xendit transactions)
+          const isPaid = booking.paymentStatus === 'paid';
           const amount = booking.amount ? parseFloat(booking.amount) : 0;
-          totalRevenue += amount;
+          
+          // Only add to revenue if payment status is 'paid'
+          if (isPaid) {
+            totalRevenue += amount;
+          }
           
           if (booking.createdAt) {
             const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
             if (bookingDate >= currentWeekStart) {
               currentWeekBookings++;
-              currentWeekRevenue += amount;
+              // Only add to revenue if paid
+              if (isPaid) {
+                currentWeekRevenue += amount;
+              }
             } else if (bookingDate >= lastWeekStart && bookingDate < lastWeekEnd) {
               previousWeekBookings++;
-              previousWeekRevenue += amount;
+              // Only add to revenue if paid
+              if (isPaid) {
+                previousWeekRevenue += amount;
+              }
             }
           }
         });
@@ -414,25 +417,25 @@ export default function DashboardPage() {
       title: 'Total Users', 
       value: stats.userCount, 
       icon: <UsersIcon />, 
-      percentage: calculatePercentage(weeklyStats.users.current, weeklyStats.users.previous)
+      percentage: null
     },
     { 
       title: 'Total Bookings', 
       value: stats.bookingCount, 
       icon: <BookingsIcon />, 
-      percentage: calculatePercentage(weeklyStats.bookings.current, weeklyStats.bookings.previous)
+      percentage: null
     },
     { 
       title: 'Active Tours', 
       value: stats.tourCount, 
       icon: <ToursIcon />, 
-      percentage: null // No percentage for Active Tours as requested
+      percentage: null
     },
     { 
       title: 'Total Revenue', 
       value: stats.revenue, 
       icon: <RevenueIcon />, 
-      percentage: calculatePercentage(weeklyStats.revenue.current, weeklyStats.revenue.previous)
+      percentage: null
     },
   ];
 
@@ -523,22 +526,27 @@ export default function DashboardPage() {
         bookingsSnapshot.forEach((doc) => {
           const booking = doc.data();
           
-          // Track destinations from bookings
-          if (booking.tourLocation || booking.location) {
-            const destination = booking.tourLocation || booking.location;
-            if (destination) {
-              if (destinationsCount[destination]) {
-                destinationsCount[destination]++;
-              } else {
-                destinationsCount[destination] = 1;
+          // Only count paid bookings for revenue and analytics
+          const isPaid = booking.paymentStatus === 'paid';
+          
+          // Track destinations from bookings (only paid bookings)
+          if (isPaid) {
+            if (booking.tourLocation || booking.location) {
+              const destination = booking.tourLocation || booking.location;
+              if (destination) {
+                if (destinationsCount[destination]) {
+                  destinationsCount[destination]++;
+                } else {
+                  destinationsCount[destination] = 1;
+                }
               }
-            }
-          } else if (booking.tourName) {
-            // If no location directly provided but we have a tourName, use it as fallback
-            if (destinationsCount[booking.tourName]) {
-              destinationsCount[booking.tourName]++;
-            } else {
-              destinationsCount[booking.tourName] = 1;
+            } else if (booking.tourName) {
+              // If no location directly provided but we have a tourName, use it as fallback
+              if (destinationsCount[booking.tourName]) {
+                destinationsCount[booking.tourName]++;
+              } else {
+                destinationsCount[booking.tourName] = 1;
+              }
             }
           }
           
@@ -549,13 +557,13 @@ export default function DashboardPage() {
             if (bookingDate >= twelveMonthsAgo) {
               const monthKey = bookingDate.toLocaleDateString('en-US', { month: 'short' });
               
-              // Add to monthly revenue
-              if (monthlyRevenueData[monthKey] !== undefined) {
+              // Only add to monthly revenue if payment status is 'paid'
+              if (isPaid && monthlyRevenueData[monthKey] !== undefined) {
                 monthlyRevenueData[monthKey] += parseFloat(booking.amount);
               }
               
-              // Count bookings per month
-              if (monthlyBookingsData[monthKey] !== undefined) {
+              // Count bookings per month (only paid bookings)
+              if (isPaid && monthlyBookingsData[monthKey] !== undefined) {
                 monthlyBookingsData[monthKey]++;
               }
             }

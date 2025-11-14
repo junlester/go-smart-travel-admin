@@ -11,6 +11,7 @@ interface BookingData {
   amount?: string | number;
   createdAt?: any;
   status?: string;
+  paymentStatus?: string;
   type?: string;
   [key: string]: any;
 }
@@ -54,15 +55,18 @@ export default function RevenueReport() {
         );
         
         const bookingsSnapshot = await getDocs(bookingsQuery);
-        const bookings = bookingsSnapshot.docs.map(doc => {
-          const data = doc.data() as BookingData;
-          return {
-            id: doc.id,
-            amount: parseFloat(data.amount?.toString() || '0'),
-            createdAt: data.createdAt,
-            status: data.status || 'pending'
-          };
-        });
+        const bookings = bookingsSnapshot.docs
+          .map(doc => {
+            const data = doc.data() as BookingData;
+            return {
+              id: doc.id,
+              amount: parseFloat(data.amount?.toString() || '0'),
+              createdAt: data.createdAt,
+              status: data.status || 'pending',
+              paymentStatus: data.paymentStatus || 'unpaid'
+            };
+          })
+          .filter(booking => booking.paymentStatus === 'paid'); // Only include paid bookings
         
         // Process revenue data based on time range
         const processedData = processRevenueData(bookings, timeRange);
@@ -70,13 +74,15 @@ export default function RevenueReport() {
         // Calculate financial summary
         const currYearBookings = bookings.filter(booking => {
           if (!booking.createdAt) return false;
-          const bookingDate = booking.createdAt.toDate();
+          // Handle both Firestore Timestamp and string dates
+          const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
           return bookingDate.getFullYear() === now.getFullYear();
         });
         
         const prevYearBookings = bookings.filter(booking => {
           if (!booking.createdAt) return false;
-          const bookingDate = booking.createdAt.toDate();
+          // Handle both Firestore Timestamp and string dates
+          const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
           return bookingDate.getFullYear() === now.getFullYear() - 1;
         });
         
@@ -88,10 +94,9 @@ export default function RevenueReport() {
           ? ((currYearRevenue - prevYearRevenue) / prevYearRevenue * 100) 
           : 0;
         
-        // Calculate average order value
-        const completedBookings = bookings.filter(booking => booking.status === 'completed');
-        const avgOrderValue = completedBookings.length > 0 
-          ? completedBookings.reduce((sum, booking) => sum + booking.amount, 0) / completedBookings.length
+        // Calculate average order value (all bookings are already filtered to paid)
+        const avgOrderValue = bookings.length > 0 
+          ? bookings.reduce((sum, booking) => sum + booking.amount, 0) / bookings.length
           : 0;
         
         // Project annual revenue based on current year-to-date
@@ -158,7 +163,8 @@ export default function RevenueReport() {
       
       const monthBookings = bookings.filter(booking => {
         if (!booking.createdAt) return false;
-        const bookingDate = booking.createdAt.toDate();
+        // Handle both Firestore Timestamp and string dates
+        const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
         return bookingDate.getMonth() === monthDate.getMonth() && 
                bookingDate.getFullYear() === monthDate.getFullYear();
       });
@@ -187,7 +193,8 @@ export default function RevenueReport() {
       
       const quarterBookings = bookings.filter(booking => {
         if (!booking.createdAt) return false;
-        const bookingDate = booking.createdAt.toDate();
+        // Handle both Firestore Timestamp and string dates
+        const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
         const bookingMonth = bookingDate.getMonth();
         return bookingDate.getFullYear() === year && 
                bookingMonth >= startMonth && bookingMonth <= endMonth;
@@ -212,7 +219,8 @@ export default function RevenueReport() {
       
       const yearBookings = bookings.filter(booking => {
         if (!booking.createdAt) return false;
-        const bookingDate = booking.createdAt.toDate();
+        // Handle both Firestore Timestamp and string dates
+        const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
         return bookingDate.getFullYear() === yearDate.getFullYear();
       });
       

@@ -40,43 +40,34 @@ export default function PopularDestinationsReport() {
       try {
         setLoading(true);
         
-        // Fetch tours data - sort by booking count or popularity metric if available
-        const toursQuery = query(
-          collection(db, 'tours'),
-          orderBy('bookingCount', 'desc'),
-          limit(20)
-        );
-        
-        const toursSnapshot = await getDocs(toursQuery);
+        // Fetch all tours
+        const toursSnapshot = await getDocs(collection(db, 'tours'));
         let tours = toursSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data() as TourData
         }));
         
-        // If no booking count field exists, we need to count bookings for each tour
-        if (tours.length > 0 && !tours[0].bookingCount) {
-          // Fetch all bookings
-          const bookingsSnapshot = await getDocs(collection(db, 'bookings'));
-          const bookings = bookingsSnapshot.docs.map(doc => doc.data() as BookingData);
-          
-          // Count bookings per tour
-          const tourBookingCounts: {[tourId: string]: number} = {};
-          
-          bookings.forEach(booking => {
-            if (booking.tourId) {
-              tourBookingCounts[booking.tourId] = (tourBookingCounts[booking.tourId] || 0) + 1;
-            }
-          });
-          
-          // Update tour data with booking counts
-          tours = tours.map(tour => ({
-            ...tour,
-            bookingCount: tourBookingCounts[tour.id] || 0
-          }));
-          
-          // Sort by booking count
-          tours.sort((a, b) => (b.bookingCount || 0) - (a.bookingCount || 0));
-        }
+        // Fetch all bookings to count per tour
+        const bookingsSnapshot = await getDocs(collection(db, 'bookings'));
+        const bookings = bookingsSnapshot.docs.map(doc => doc.data() as BookingData);
+        
+        // Count bookings per tour
+        const tourBookingCounts: {[tourId: string]: number} = {};
+        
+        bookings.forEach(booking => {
+          if (booking.tourId) {
+            tourBookingCounts[booking.tourId] = (tourBookingCounts[booking.tourId] || 0) + 1;
+          }
+        });
+        
+        // Update tour data with booking counts
+        tours = tours.map(tour => ({
+          ...tour,
+          bookingCount: tourBookingCounts[tour.id] || 0
+        }));
+        
+        // Sort by booking count (descending)
+        tours.sort((a, b) => (b.bookingCount || 0) - (a.bookingCount || 0));
         
         // Get top 5 tours by booking count
         const topDestinations = tours.slice(0, 5).map(tour => ({
@@ -150,19 +141,16 @@ export default function PopularDestinationsReport() {
         }));
         
         // Process seasonal trends - analyze bookings by month
-        const allBookingsQuery = query(collection(db, 'bookings'), orderBy('createdAt', 'asc'));
-        const allBookingsSnapshot = await getDocs(allBookingsQuery);
-        const allBookings = allBookingsSnapshot.docs.map(doc => doc.data());
-        
         // Count bookings by month
         const monthCounts: {[month: string]: number} = {
           'Jan': 0, 'Feb': 0, 'Mar': 0, 'Apr': 0, 'May': 0, 'Jun': 0,
           'Jul': 0, 'Aug': 0, 'Sep': 0, 'Oct': 0, 'Nov': 0, 'Dec': 0
         };
         
-        allBookings.forEach(booking => {
+        bookings.forEach(booking => {
           if (booking.createdAt) {
-            const date = booking.createdAt.toDate();
+            // Handle both Firestore Timestamp and string dates
+            const date = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
             const month = date.toLocaleDateString('en-US', { month: 'short' });
             if (monthCounts[month] !== undefined) {
               monthCounts[month] += 1;
@@ -467,22 +455,6 @@ export default function PopularDestinationsReport() {
               <Bar dataKey="bookings" name="Number of Bookings" fill="#8884D8" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </div>
-      
-      {/* Philippines Map (placeholder) */}
-      <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300">
-        <h3 className="text-lg font-medium text-gray-700 mb-4">Destinations Map</h3>
-        <p className="text-gray-500 mb-4">Geographic distribution of popular destinations across the Philippines.</p>
-        
-        <div className="bg-gray-50 rounded-lg h-96 flex items-center justify-center">
-          <div className="text-center p-6">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mx-auto text-gray-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-            </svg>
-            <p className="text-gray-500">Interactive map would be displayed here.</p>
-            <p className="text-gray-500 text-sm mt-2">Requires Google Maps API integration.</p>
-          </div>
         </div>
       </div>
     </div>

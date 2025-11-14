@@ -75,11 +75,14 @@ export default function PaymentHistoryReport() {
             }
           };
           
-          // Format payment status based on booking status
+          // Format payment status based on booking paymentStatus
           const getPaymentStatus = (status: string, paymentStatus: string) => {
-            if (paymentStatus) return paymentStatus;
+            // Use paymentStatus if available, otherwise infer from status
+            if (paymentStatus === 'paid') return 'completed';
+            if (paymentStatus === 'unpaid' || paymentStatus === 'partial') return 'pending';
+            if (paymentStatus === 'refunded') return 'failed'; // Treat refunded as failed for display
             if (status === 'cancelled') return 'failed';
-            if (status === 'confirmed') return 'completed';
+            if (status === 'confirmed' && paymentStatus === 'paid') return 'completed';
             return 'pending';
           };
           
@@ -93,7 +96,7 @@ export default function PaymentHistoryReport() {
             amountValue,
             customer: data.userName || 'Unknown User',
             status: getPaymentStatus(data.status || 'pending', data.paymentStatus || ''),
-            method: data.paymentMethod || 'Credit Card'
+            method: data.paymentMethod || 'Xendit'
           };
         });
         
@@ -126,7 +129,11 @@ export default function PaymentHistoryReport() {
           'failed': 0
         };
         
-                transactions.forEach(transaction => {          const status = (transaction.status ?? 'unknown').toLowerCase();          if (statusCounts[status] !== undefined) {            statusCounts[status] += 1;          }
+        transactions.forEach(transaction => {
+          const status = (transaction.status ?? 'unknown').toLowerCase();
+          if (statusCounts[status] !== undefined) {
+            statusCounts[status] += 1;
+          }
         });
         
         // Calculate status percentages
@@ -174,14 +181,11 @@ export default function PaymentHistoryReport() {
         const avgAmount = transactions.length > 0 ? totalAmount / transactions.length : 0;
         const successCount = transactions.filter(t => t.status === 'completed').length;
         const successRate = transactions.length > 0 ? (successCount / transactions.length * 100) : 0;
-        const refundCount = transactions.filter(t => t.status === 'refunded').length;
-        const refundRate = transactions.length > 0 ? (refundCount / transactions.length * 100) : 0;
         
         const summary = {
           total: formatPrice(totalAmount),
           average: formatPrice(avgAmount),
-          success_rate: `${successRate.toFixed(1)}%`,
-          refund_rate: `${refundRate.toFixed(1)}%`
+          success_rate: `${successRate.toFixed(1)}%`
         };
         
         setPaymentData({
@@ -228,8 +232,7 @@ export default function PaymentHistoryReport() {
           summary: {
             total: '₱0',
             average: '₱0',
-            success_rate: '0.0%',
-            refund_rate: '0.0%'
+            success_rate: '0.0%'
           }
         });
       } finally {
@@ -294,8 +297,7 @@ export default function PaymentHistoryReport() {
       csvContent += "Summary Metrics\r\n";
       csvContent += "Total Amount," + paymentData.summary.total + "\r\n";
       csvContent += "Average Transaction," + paymentData.summary.average + "\r\n";
-      csvContent += "Success Rate," + paymentData.summary.success_rate + "\r\n";
-      csvContent += "Refund Rate," + paymentData.summary.refund_rate + "\r\n\r\n";
+      csvContent += "Success Rate," + paymentData.summary.success_rate + "\r\n\r\n";
       
       // Add payment methods data
       csvContent += "Payment Methods Distribution\r\n";
@@ -384,7 +386,7 @@ export default function PaymentHistoryReport() {
       </div>
       
       {/* Payment summary */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300">
           <p className="text-gray-600 text-sm">Total Transactions</p>
           <p className="text-3xl font-bold text-gray-900">{paymentData.summary.total}</p>
@@ -398,11 +400,6 @@ export default function PaymentHistoryReport() {
         <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300">
           <p className="text-gray-600 text-sm">Success Rate</p>
           <p className="text-3xl font-bold text-green-500">{paymentData.summary.success_rate}</p>
-        </div>
-        
-        <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300">
-          <p className="text-gray-600 text-sm">Refund Rate</p>
-          <p className="text-3xl font-bold text-yellow-500">{paymentData.summary.refund_rate}</p>
         </div>
       </div>
       

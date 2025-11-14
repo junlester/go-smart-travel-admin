@@ -132,3 +132,4 @@ ONESIGNAL_REST_API_KEY=your_onesignal_rest_api_key
 
 **Location:** `admin-panel/go-smart-travel-admin/.env.local`
 
+

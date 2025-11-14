@@ -78,13 +78,6 @@ export default function ReportsPage() {
         />
         
         <ReportCard 
-          title="Customer Activity" 
-          description="Analyze customer engagement patterns, popular features, and user retention metrics."
-          icon={<CustomerIcon />}
-          href="/dashboard/reports/customer-activity"
-        />
-        
-        <ReportCard 
           title="Revenue Report" 
           description="Track your financial performance, revenue growth, and sales forecasts."
           icon={<RevenueIcon />}

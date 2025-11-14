@@ -121,29 +121,19 @@ export default function BookingSummaryReport() {
           value
         }));
         
-        // Process booking sources (determine from user agent or device info if available)
+        // Process booking sources - all bookings come from mobile app
+        // Since we don't track source, we'll show all as Mobile App
         const sourceCounts: {[key: string]: number} = {
-          'Mobile App': 0,
-          'Website': 0,
-          'Partner Sites': 0,
-          'Phone': 0
+          'Mobile App': bookings.length
         };
-        
-        bookings.forEach(booking => {
-          // Check for source information in the booking data
-          // This is an example - your actual data structure may differ
-          const source = booking.source || 
-                         (booking.userAgent && booking.userAgent.includes('Mobile') ? 'Mobile App' : 'Website');
-          sourceCounts[source] = (sourceCounts[source] || 0) + 1;
-        });
         
         const sourceDistribution = Object.entries(sourceCounts).map(([name, value]) => ({
           name,
           value
         }));
         
-        // Calculate completion rate
-        const completedCount = statusCounts.completed || 0;
+        // Calculate completion rate - bookings with paymentStatus === 'paid'
+        const completedCount = bookings.filter(b => b.paymentStatus === 'paid').length;
         const completionRate = totalBookings > 0 ? Math.round((completedCount / totalBookings) * 100) : 0;
         
         // Process bookings by date
@@ -159,7 +149,8 @@ export default function BookingSummaryReport() {
         bookings.forEach(booking => {
           if (!booking.createdAt) return;
           
-          const bookingDate = booking.createdAt.toDate();
+          // Handle both Firestore Timestamp and string dates
+          const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
           let dateLabel = '';
           
           if (dateRange === 'week') {

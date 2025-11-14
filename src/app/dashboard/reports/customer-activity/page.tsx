@@ -66,7 +66,8 @@ export default function CustomerActivityReport() {
         // Count new users per month
         users.forEach(user => {
           if (user.createdAt) {
-            const userDate = user.createdAt.toDate();
+            // Handle both Firestore Timestamp and string dates
+            const userDate = user.createdAt.toDate ? user.createdAt.toDate() : new Date(user.createdAt);
             const monthKey = userDate.toLocaleDateString('en-US', { month: 'short' });
             
             if (monthlyUserData[monthKey]) {
@@ -75,35 +76,38 @@ export default function CustomerActivityReport() {
           }
         });
         
-        // 2. Fetch login activities for active user counts
-        const activitiesQuery = query(
-          collection(db, 'activities'),
-          where('type', '==', 'login'),
-          where('timestamp', '>=', startTimestamp),
-          orderBy('timestamp', 'asc')
+        // 2. Fetch bookings to determine active users (users who made bookings)
+        const bookingsQuery = query(
+          collection(db, 'bookings'),
+          where('createdAt', '>=', startTimestamp),
+          orderBy('createdAt', 'asc')
         );
         
-        const activitiesSnapshot = await getDocs(activitiesQuery);
-        const loginActivities = activitiesSnapshot.docs.map(doc => ({
+        const bookingsSnapshot = await getDocs(bookingsQuery);
+        const bookings = bookingsSnapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data() as ActivityData
+          ...doc.data()
         }));
         
-        // Count active users (users who logged in) per month
-        // This is a simplified approach - in a real app you might have more sophisticated activity tracking
+        // Count active users (users who made bookings) per month
         const activeUserIds = new Set<string>();
+        const monthlyActiveUsers: {[key: string]: Set<string>} = {};
         
-        loginActivities.forEach(activity => {
-          if (activity.timestamp && activity.userId) {
-            const activityDate = activity.timestamp.toDate();
-            const monthKey = activityDate.toLocaleDateString('en-US', { month: 'short' });
+        // Initialize monthly active users sets
+        Object.keys(monthlyUserData).forEach(month => {
+          monthlyActiveUsers[month] = new Set<string>();
+        });
+        
+        bookings.forEach(booking => {
+          if (booking.createdAt && booking.userId) {
+            // Handle both Firestore Timestamp and string dates
+            const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
+            const monthKey = bookingDate.toLocaleDateString('en-US', { month: 'short' });
             
             if (monthlyUserData[monthKey]) {
-              activeUserIds.add(activity.userId);
-              
-              // We'll consider a unique user active for a given month
-              // In a real app, you might count a user active multiple times across months
-              monthlyUserData[monthKey].activeUsers += 1;
+              activeUserIds.add(booking.userId);
+              monthlyActiveUsers[monthKey].add(booking.userId);
+              monthlyUserData[monthKey].activeUsers = monthlyActiveUsers[monthKey].size;
             }
           }
         });
@@ -115,60 +119,45 @@ export default function CustomerActivityReport() {
           newUsers: data.newUsers
         }));
         
-        // 3. Fetch feature usage data
-        const featureUsageQuery = query(
-          collection(db, 'activities'),
-          where('type', '==', 'feature_used'),
-          where('timestamp', '>=', startTimestamp)
-        );
+        // 3. Calculate feature usage based on bookings and tour customizations
+        // Fetch tour customizations to count customization requests
+        const customizationsSnapshot = await getDocs(collection(db, 'tour_customizations'));
+        const customizations = customizationsSnapshot.docs.map(doc => doc.data());
         
-        const featureUsageSnapshot = await getDocs(featureUsageQuery);
-        const featureActivities = featureUsageSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data() as ActivityData
-        }));
-        
-        // Count feature usage
+        // Count feature usage based on actual app usage
         const featureCount: {[key: string]: number} = {
-          'Itinerary Planning': 0,
-          'Tour Bookings': 0,
-          'Destination Search': 0,
-          'Reviews': 0,
-          'Maps': 0
+          'Tour Bookings': bookings.length,
+          'Tour Customizations': customizations.length,
+          'Itinerary Planning': 0, // Not directly trackable
+          'Destination Search': 0, // Not directly trackable
+          'Reviews': 0 // Not directly trackable
         };
-        
-        featureActivities.forEach(activity => {
-          const featureName = activity.featureName || 'Other';
-          if (featureCount[featureName] !== undefined) {
-            featureCount[featureName] += 1;
-          } else {
-            featureCount[featureName] = 1;
-          }
-        });
         
         // Calculate total feature usage for percentage
         const totalFeatureUsage = Object.values(featureCount).reduce((sum, count) => sum + count, 0);
         
         // Convert to percentage
-        const featureUsage = Object.entries(featureCount).map(([feature, count]) => ({
-          feature,
-          usage: totalFeatureUsage > 0 ? Math.round((count / totalFeatureUsage) * 100) : 0
-        }));
+        const featureUsage = Object.entries(featureCount)
+          .filter(([_, count]) => count > 0) // Only show features with usage
+          .map(([feature, count]) => ({
+            feature,
+            usage: totalFeatureUsage > 0 ? Math.round((count / totalFeatureUsage) * 100) : 0
+          }));
         
-        // 4. Calculate retention metrics
-        // Get all users who have logged in at least once
+        // 4. Calculate retention metrics based on bookings
+        // Get all users who have made at least one booking
         const totalActiveUsers = activeUserIds.size;
         
-        // Get users who have logged in more than once (returning users)
-        const userLoginCounts: {[key: string]: number} = {};
+        // Get users who have made more than one booking (returning customers)
+        const userBookingCounts: {[key: string]: number} = {};
         
-        loginActivities.forEach(activity => {
-          if (activity.userId) {
-            userLoginCounts[activity.userId] = (userLoginCounts[activity.userId] || 0) + 1;
+        bookings.forEach(booking => {
+          if (booking.userId) {
+            userBookingCounts[booking.userId] = (userBookingCounts[booking.userId] || 0) + 1;
           }
         });
         
-        const returningUsers = Object.values(userLoginCounts).filter(count => count > 1).length;
+        const returningUsers = Object.values(userBookingCounts).filter(count => count > 1).length;
         
         const userRetention = {
           total: usersSnapshot.size,

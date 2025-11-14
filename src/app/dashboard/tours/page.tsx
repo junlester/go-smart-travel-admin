@@ -27,6 +27,23 @@ type Tour = {
   images?: string[];  // Add images array to Tour type
   category?: string;
   description?: string;
+  averageRating?: number;
+  reviewCount?: number;
+};
+
+// Review type definition
+type Review = {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  bookingId: string;
+  tourId: string;
+  tourName: string;
+  rating: number;
+  review: string;
+  createdAt: any;
+  status: string;
 };
 
 export default function ToursPage() {
@@ -37,6 +54,106 @@ export default function ToursPage() {
   const [activeImageIndices, setActiveImageIndices] = useState<{[tourId: string]: number}>({});
   const carouselRefs = useRef<{[tourId: string]: HTMLDivElement | null}>({});
   const router = useRouter();
+  const [selectedTourReviews, setSelectedTourReviews] = useState<Review[]>([]);
+  const [selectedTourForReviews, setSelectedTourForReviews] = useState<Tour | null>(null);
+  const [reviewsModalOpen, setReviewsModalOpen] = useState(false);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+
+  // Fetch reviews for a specific tour and calculate average rating
+  const fetchTourReviews = async (tourId: string): Promise<{ averageRating: number; reviewCount: number }> => {
+    try {
+      const reviewsQuery = query(
+        collection(db, 'reviews'),
+        where('tourId', '==', tourId),
+        where('status', '==', 'published')
+      );
+      const reviewsSnapshot = await getDocs(reviewsQuery);
+      
+      if (reviewsSnapshot.empty) {
+        return { averageRating: 0, reviewCount: 0 };
+      }
+      
+      let totalRating = 0;
+      let count = 0;
+      
+      reviewsSnapshot.forEach((doc) => {
+        const reviewData = doc.data();
+        if (reviewData.rating && reviewData.rating >= 1 && reviewData.rating <= 5) {
+          totalRating += reviewData.rating;
+          count++;
+        }
+      });
+      
+      const averageRating = count > 0 ? totalRating / count : 0;
+      return { averageRating: Math.round(averageRating * 10) / 10, reviewCount: count };
+    } catch (error) {
+      console.error('Error fetching tour reviews:', error);
+      return { averageRating: 0, reviewCount: 0 };
+    }
+  };
+
+  // Fetch all reviews for a tour (for modal display)
+  const fetchAllTourReviews = async (tourId: string) => {
+    try {
+      setReviewsLoading(true);
+      // Query without orderBy to avoid needing composite index
+      // We'll sort in JavaScript instead
+      const reviewsQuery = query(
+        collection(db, 'reviews'),
+        where('tourId', '==', tourId),
+        where('status', '==', 'published')
+      );
+      const reviewsSnapshot = await getDocs(reviewsQuery);
+      
+      const reviewsList: Review[] = [];
+      reviewsSnapshot.forEach((doc) => {
+        const data = doc.data();
+        reviewsList.push({
+          id: doc.id,
+          userId: data.userId || '',
+          userName: data.userName || 'Anonymous',
+          userEmail: data.userEmail || '',
+          bookingId: data.bookingId || '',
+          tourId: data.tourId || '',
+          tourName: data.tourName || '',
+          rating: data.rating || 0,
+          review: data.review || '',
+          createdAt: data.createdAt,
+          status: data.status || 'published'
+        });
+      });
+      
+      // Sort by createdAt in descending order (newest first) in JavaScript
+      reviewsList.sort((a, b) => {
+        if (!a.createdAt || !b.createdAt) return 0;
+        const aTime = a.createdAt.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime();
+        const bTime = b.createdAt.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime();
+        return bTime - aTime; // Descending order
+      });
+      
+      setSelectedTourReviews(reviewsList);
+    } catch (error) {
+      console.error('Error fetching all tour reviews:', error);
+      setSelectedTourReviews([]);
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+
+  // Open reviews modal
+  const openReviewsModal = async (tour: Tour, e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    setSelectedTourForReviews(tour);
+    setReviewsModalOpen(true);
+    await fetchAllTourReviews(tour.id);
+  };
+
+  // Close reviews modal
+  const closeReviewsModal = () => {
+    setReviewsModalOpen(false);
+    setSelectedTourForReviews(null);
+    setSelectedTourReviews([]);
+  };
 
   // Fetch tours from Firestore
   useEffect(() => {
@@ -47,7 +164,9 @@ export default function ToursPage() {
         const querySnapshot = await getDocs(toursQuery);
         
         const toursList: Tour[] = [];
-        querySnapshot.forEach((doc) => {
+        
+        // Fetch all tours first
+        for (const doc of querySnapshot.docs) {
           const data = doc.data();
           toursList.push({
             id: doc.id,
@@ -63,11 +182,25 @@ export default function ToursPage() {
             imageUrl: data.imageUrl || (data.images && data.images.length > 0 ? data.images[0] : ''),
             images: data.images || [], // Add the images array
             category: data.category || '',
-            description: data.description || ''
+            description: data.description || '',
+            averageRating: 0,
+            reviewCount: 0
           });
-        });
+        }
         
-        setTours(toursList);
+        // Fetch reviews for each tour
+        const toursWithReviews = await Promise.all(
+          toursList.map(async (tour) => {
+            const { averageRating, reviewCount } = await fetchTourReviews(tour.id);
+            return {
+              ...tour,
+              averageRating,
+              reviewCount
+            };
+          })
+        );
+        
+        setTours(toursWithReviews);
       } catch (error) {
         console.error('Error fetching tours:', error);
         // If error, use empty array
@@ -406,6 +539,42 @@ export default function ToursPage() {
                         </svg>
                         {tour.location}
                       </div>
+                    {/* Reviews Section - Stars and View Reviews */}
+                    {tour.reviewCount && tour.reviewCount > 0 ? (
+                      <div className="mb-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="flex items-center">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <svg
+                                key={star}
+                                className={`w-4 h-4 ${
+                                  star <= Math.round(tour.averageRating || 0)
+                                    ? 'text-yellow-400 fill-current'
+                                    : 'text-gray-300'
+                                }`}
+                                viewBox="0 0 20 20"
+                                fill="currentColor"
+                              >
+                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                              </svg>
+                            ))}
+                          </div>
+                          <span className="text-sm text-gray-600">
+                            {tour.averageRating?.toFixed(1)} ({tour.reviewCount} {tour.reviewCount === 1 ? 'review' : 'reviews'})
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => openReviewsModal(tour, e)}
+                          className="text-blue-600 hover:text-blue-700 text-sm font-medium cursor-pointer"
+                        >
+                          View Reviews →
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mb-2">
+                        <span className="text-sm text-gray-500">No reviews yet</span>
+                      </div>
+                    )}
                     <div className="flex justify-between items-center mb-2">
                       <span className="text-green-600 font-bold text-lg">{formatPrice(parseFloat(tour.price.toString()))}</span>
                       <span className="text-sm text-black bg-gray-200 px-2 py-1 rounded">
@@ -459,6 +628,109 @@ export default function ToursPage() {
               </div>
             )}
           </>
+        )}
+
+      {/* Reviews Modal */}
+      {reviewsModalOpen && selectedTourForReviews && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-800">{selectedTourForReviews.name} - Reviews</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  {selectedTourReviews.length} {selectedTourReviews.length === 1 ? 'review' : 'reviews'}
+                  {selectedTourForReviews.averageRating && selectedTourForReviews.averageRating > 0 && (
+                    <span className="ml-2">
+                      • Average: {selectedTourForReviews.averageRating.toFixed(1)}/5.0
+                    </span>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={closeReviewsModal}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {reviewsLoading ? (
+                <div className="flex justify-center items-center py-12">
+                  <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-500"></div>
+                </div>
+              ) : selectedTourReviews.length === 0 ? (
+                <div className="text-center py-12">
+                  <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.364 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.364-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                  </svg>
+                  <p className="mt-4 text-gray-600">No reviews yet for this tour.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {selectedTourReviews.map((review) => (
+                    <div key={review.id} className="border-b border-gray-200 pb-6 last:border-b-0 last:pb-0">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="flex items-center">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <svg
+                                  key={star}
+                                  className={`w-5 h-5 ${
+                                    star <= review.rating
+                                      ? 'text-yellow-400 fill-current'
+                                      : 'text-gray-300'
+                                  }`}
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                </svg>
+                              ))}
+                            </div>
+                            <span className="text-sm font-semibold text-gray-800">{review.userName}</span>
+                          </div>
+                          {review.createdAt && (
+                            <p className="text-xs text-gray-500 mb-2">
+                              {review.createdAt.toDate 
+                                ? review.createdAt.toDate().toLocaleDateString('en-US', { 
+                                    year: 'numeric', 
+                                    month: 'long', 
+                                    day: 'numeric' 
+                                  })
+                                : new Date(review.createdAt).toLocaleDateString('en-US', { 
+                                    year: 'numeric', 
+                                    month: 'long', 
+                                    day: 'numeric' 
+                                  })
+                              }
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-gray-700 leading-relaxed">{review.review}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={closeReviewsModal}
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
         )}
     </div>
   );

@@ -24,11 +24,12 @@ import {
   sendTripReminderSMS,
   sendWeatherAlertSMS,
   sendPromotionalSMS,
-  sendBookingConfirmationSMS
+  sendBookingConfirmationSMS,
+  sendBulkSMS
 } from '../../../utils/textBeeService';
 import { db } from '@/configs/firebase';
 import { getAdminDb, FieldValue } from '@/configs/firebaseAdmin';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 
 export async function POST(request: NextRequest) {
   try {
@@ -350,11 +351,17 @@ export async function POST(request: NextRequest) {
       }
       
       case 'trip_reminder': {
-        // Get phone numbers from Firebase for the trip
+        // Search for specific user by name
+        const userName = data.tripData?.userName?.trim();
+        if (!userName) {
+          throw new Error('User name is required');
+        }
+
         const usersSnapshot = await getDocs(collection(db, 'users'));
         const phoneNumbers: string[] = [];
         const emails: string[] = [];
         const playerIds: string[] = [];
+        let userFound = false;
 
         // Admin emails to exclude
         const adminEmails = ['admin@gosmarttravel.com'];
@@ -369,41 +376,199 @@ export async function POST(request: NextRequest) {
           if (isAdmin) {
             return; // Skip admin users
           }
+
+          // Search by displayName or email (case-insensitive)
+          const displayName = userData.displayName || '';
+          const email = userData.email || '';
+          const searchName = userName.toLowerCase();
           
-          if (userData.phoneNumber && userData.phoneNumber.startsWith('+')) {
-            phoneNumbers.push(userData.phoneNumber);
-          }
-          if (userData.email && !adminEmails.includes(userData.email.toLowerCase())) {
-            emails.push(userData.email);
-          }
-          if (userData.oneSignalPlayerId) {
-            playerIds.push(userData.oneSignalPlayerId);
+          const matchesName = displayName.toLowerCase().includes(searchName) || 
+                             email.toLowerCase().includes(searchName);
+          
+          if (matchesName) {
+            userFound = true;
+            
+            if (userData.phoneNumber && userData.phoneNumber.startsWith('+')) {
+              phoneNumbers.push(userData.phoneNumber);
+            }
+            if (userData.email && !adminEmails.includes(userData.email.toLowerCase())) {
+              emails.push(userData.email);
+            }
+            if (userData.oneSignalPlayerId) {
+              playerIds.push(userData.oneSignalPlayerId);
+            }
           }
         });
 
-        // Send push notification via OneSignal
-        const pushResult = await sendTripReminder(playerIds, data.tripData);
-        
-        // Send SMS via TextBee.dev if phone numbers are available
-        let smsResult = null;
-        if (phoneNumbers.length > 0) {
+        if (!userFound) {
+          throw new Error(`User "${userName}" not found. Please check the name and try again.`);
+        }
+
+        // Send push notification
+        let pushResult = null;
+        if (playerIds.length > 0) {
           try {
-            smsResult = await sendTripReminderSMS(
-              phoneNumbers,
-              data.tripData.destination,
-              data.tripData.startDate,
-              data.tripData.tripId
-            );
-            console.log(`✅ Trip reminder SMS sent via TextBee: ${smsResult.successCount} successful, ${smsResult.failureCount} failed`);
+            pushResult = await sendTripReminder(playerIds, data.tripData);
+            console.log('✅ Push notification sent to user');
           } catch (error: any) {
-            console.error('❌ Trip reminder SMS error:', error.message);
-            smsResult = { error: error.message, success: false };
+            console.error('❌ Push notification error:', error.message);
+            pushResult = { error: error.message };
           }
         }
 
+        // Send email notification - ALWAYS attempt to send
+        let emailResult = null;
+        console.log(`📧 Email addresses found: ${emails.length}`, emails);
+        if (emails.length > 0) {
+          try {
+            const title = `🌴 Trip Reminder: ${data.tripData.destination}`;
+            const message = `Your trip to ${data.tripData.destination} starts on ${data.tripData.startDate}. Don't forget to check your itinerary!`;
+            console.log(`📧 Attempting to send email to:`, emails);
+            emailResult = await sendBulkEmailNotification(emails, title, message);
+            console.log(`✅ Email result:`, emailResult);
+            if (emailResult.success) {
+              console.log(`✅ Email sent successfully to ${emailResult.results?.filter((r: any) => r.success).length || 0} recipient(s)`);
+            } else {
+              console.warn(`⚠️ Email sending had issues:`, emailResult);
+            }
+          } catch (error: any) {
+            console.error('❌ Email notification error:', error.message);
+            console.error('❌ Email error stack:', error.stack);
+            emailResult = { error: error.message, success: false };
+          }
+        } else {
+          console.warn('⚠️ No email addresses found for user:', userName);
+          emailResult = { error: 'No email address found for user', success: false };
+        }
+
+        // Send SMS notification via TextBee (NOT OneSignal)
+        let smsResult = null;
+        console.log(`📱 Phone numbers found: ${phoneNumbers.length}`, phoneNumbers);
+        if (phoneNumbers.length > 0) {
+          try {
+            const smsMessage = `🌴 Trip Reminder: Your trip to ${data.tripData.destination} starts on ${data.tripData.startDate}. Don't forget to check your itinerary!`;
+            console.log(`📱 Attempting to send SMS via TextBee to:`, phoneNumbers);
+            smsResult = await sendBulkSMS(phoneNumbers, smsMessage);
+            console.log(`✅ SMS result:`, smsResult);
+            if (smsResult.successCount > 0) {
+              console.log(`✅ SMS sent successfully to ${smsResult.successCount} recipient(s) via TextBee`);
+            } else {
+              console.warn(`⚠️ SMS sending had issues:`, smsResult);
+            }
+          } catch (error: any) {
+            console.error('❌ SMS notification error:', error.message);
+            console.error('❌ SMS error stack:', error.stack);
+            smsResult = { error: error.message, success: false, successCount: 0, failureCount: phoneNumbers.length };
+          }
+        } else {
+          console.warn('⚠️ No phone numbers found for user:', userName);
+          smsResult = { error: 'No phone number found for user', success: false, successCount: 0, failureCount: 0 };
+        }
+
+        // Create in-app notification in Firestore - ALWAYS attempt to create (using Admin SDK)
+        let inAppResult = null;
+        try {
+          const userDoc = usersSnapshot.docs.find(doc => {
+            const userData = doc.data();
+            const displayName = userData.displayName || '';
+            const email = userData.email || '';
+            const searchName = userName.toLowerCase();
+            return displayName.toLowerCase().includes(searchName) || 
+                   email.toLowerCase().includes(searchName);
+          });
+
+          if (userDoc) {
+            // Fetch user's paid bookings to get tourId
+            let tourId = null;
+            let bookingId = null;
+            try {
+              const bookingsQuery = query(
+                collection(db, 'bookings'),
+                where('userId', '==', userDoc.id),
+                where('paymentStatus', '==', 'paid')
+              );
+              const bookingsSnapshot = await getDocs(bookingsQuery);
+              
+              // Find booking matching the destination and start date
+              bookingsSnapshot.forEach((bookingDoc) => {
+                const bookingData = bookingDoc.data();
+                const bookingTravelDate = bookingData.travelDate?.toDate ? 
+                  bookingData.travelDate.toDate().toISOString().split('T')[0] : 
+                  bookingData.travelDate;
+                
+                // Match by destination and start date
+                if (bookingData.tourLocation === data.tripData.destination || 
+                    bookingData.tourName === data.tripData.destination) {
+                  if (bookingTravelDate === data.tripData.startDate || !tourId) {
+                    tourId = bookingData.tourId || null;
+                    bookingId = bookingDoc.id;
+                  }
+                }
+              });
+              
+              // If no exact match, use the first upcoming booking
+              if (!tourId && bookingsSnapshot.docs.length > 0) {
+                const firstBooking = bookingsSnapshot.docs[0];
+                const bookingData = firstBooking.data();
+                tourId = bookingData.tourId || null;
+                bookingId = firstBooking.id;
+              }
+              
+              console.log(`📱 Found tourId: ${tourId}, bookingId: ${bookingId} for user`);
+            } catch (bookingError: any) {
+              console.warn('⚠️ Could not fetch user bookings for tourId:', bookingError.message);
+            }
+            
+            console.log(`📱 Creating in-app notification for user: ${userDoc.id}`);
+            const notificationData = {
+              userId: userDoc.id,
+              title: `🌴 Trip Reminder: ${data.tripData.destination}`,
+              message: `Your trip to ${data.tripData.destination} starts on ${data.tripData.startDate}. Don't forget to check your itinerary!`,
+              type: 'trip_reminder',
+              isRead: false,
+              createdAt: FieldValue.serverTimestamp(),
+              userName: 'Admin',
+              userRole: 'Admin',
+              tourId: tourId || null,
+              bookingId: bookingId || null
+            };
+            console.log('📱 Notification data:', notificationData);
+            
+            // Use Admin SDK to bypass Firestore security rules
+            const adminDb = getAdminDb();
+            if (!adminDb) {
+              console.warn('⚠️ Firebase Admin not initialized - skipping in-app notification');
+              inAppResult = { error: 'Firebase Admin not initialized', success: false };
+            } else {
+              const notificationRef = await adminDb.collection('notifications').add(notificationData);
+              console.log('✅ In-app notification created with ID:', notificationRef.id);
+              inAppResult = { success: true, notificationId: notificationRef.id };
+            }
+          } else {
+            console.warn('⚠️ User document not found for in-app notification');
+            inAppResult = { error: 'User document not found', success: false };
+          }
+        } catch (error: any) {
+          console.error('❌ In-app notification error:', error.message);
+          console.error('❌ In-app notification error stack:', error.stack);
+          console.error('❌ Full error:', JSON.stringify(error, null, 2));
+          inAppResult = { error: error.message, success: false };
+        }
+
         result = {
-          ...pushResult,
-          sms: smsResult
+          id: pushResult?.id || `trip-reminder-${Date.now()}`,
+          recipients: 1,
+          push: pushResult,
+          email: emailResult,
+          sms: smsResult,
+          inApp: inAppResult,
+          success: true,
+          message: `Notifications sent to user: ${userName}`,
+          details: {
+            emailSent: emailResult?.success !== false && !emailResult?.error,
+            smsSent: smsResult?.success !== false && !smsResult?.error,
+            inAppSent: inAppResult?.success !== false && !inAppResult?.error
+          }
         };
         break;
       }
@@ -614,6 +779,43 @@ export async function POST(request: NextRequest) {
           success: true
         };
 
+        break;
+      }
+      
+      case 'booking_confirmation': {
+        // Send booking confirmation email (email only, no SMS or push)
+        const emails = data.emails || [];
+        const title = data.title || 'Booking Confirmed';
+        const message = data.message || 'Your booking has been confirmed.';
+
+        if (emails.length === 0) {
+          throw new Error('No email addresses provided');
+        }
+
+        let emailResult = null;
+        try {
+          console.log(`📧 Sending booking confirmation email to:`, emails);
+          emailResult = await sendBulkEmailNotification(emails, title, message);
+          console.log(`✅ Booking confirmation email result:`, emailResult);
+          
+          if (emailResult.success) {
+            console.log(`✅ Email sent successfully to ${emailResult.results?.filter((r: any) => r.success).length || 0} recipient(s)`);
+          } else {
+            console.warn(`⚠️ Email sending had issues:`, emailResult);
+          }
+        } catch (error: any) {
+          console.error('❌ Booking confirmation email error:', error.message);
+          console.error('❌ Email error stack:', error.stack);
+          emailResult = { error: error.message, success: false };
+        }
+
+        result = {
+          id: `booking-confirmation-${Date.now()}`,
+          recipients: emailResult?.results?.filter((r: any) => r.success).length || 0,
+          email: emailResult,
+          success: emailResult?.success !== false && !emailResult?.error,
+          message: `Booking confirmation email ${emailResult?.success !== false && !emailResult?.error ? 'sent successfully' : 'failed to send'}`
+        };
         break;
       }
       

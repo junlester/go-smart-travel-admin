@@ -37,6 +37,12 @@ interface TourPackage {
     latitude: number;
     longitude: number;
   };
+  // Date validation fields
+  minAdvanceBookingDays?: number | string;
+  maxAdvanceBookingDays?: number | string;
+  startDate?: string;
+  endDate?: string;
+  blackoutDates?: string[];
 }
 
 // Cloudinary configuration
@@ -52,6 +58,7 @@ export default function CreateTourPage() {
   const [searchText, setSearchText] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [blackoutDateInput, setBlackoutDateInput] = useState('');
 
   // Tour data state
   const [tourData, setTourData] = useState<TourPackage>({
@@ -73,7 +80,13 @@ export default function CreateTourPage() {
     coordinates: {
       latitude: 14.5995,
       longitude: 120.9842
-    }
+    },
+    // Date validation defaults
+    minAdvanceBookingDays: 3,
+    maxAdvanceBookingDays: 180,
+    startDate: '',
+    endDate: '',
+    blackoutDates: []
   });
 
   // Handle image selection
@@ -299,6 +312,25 @@ export default function CreateTourPage() {
     setSearchText('');
   };
 
+  // Add blackout date
+  const addBlackoutDate = () => {
+    if (blackoutDateInput && !tourData.blackoutDates?.includes(blackoutDateInput)) {
+      setTourData(prev => ({
+        ...prev,
+        blackoutDates: [...(prev.blackoutDates || []), blackoutDateInput]
+      }));
+      setBlackoutDateInput('');
+    }
+  };
+
+  // Remove blackout date
+  const removeBlackoutDate = (date: string) => {
+    setTourData(prev => ({
+      ...prev,
+      blackoutDates: prev.blackoutDates?.filter(d => d !== date) || []
+    }));
+  };
+
   // Submit form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -329,6 +361,11 @@ export default function CreateTourPage() {
         duration: Number(tourData.duration) || 1,
         maxParticipants: tourData.maxParticipants === '' ? 1 : Number(tourData.maxParticipants),
         minParticipants: tourData.minParticipants === '' ? 1 : Number(tourData.minParticipants),
+        minAdvanceBookingDays: tourData.minAdvanceBookingDays ? Number(tourData.minAdvanceBookingDays) : 3,
+        maxAdvanceBookingDays: tourData.maxAdvanceBookingDays ? Number(tourData.maxAdvanceBookingDays) : 180,
+        startDate: tourData.startDate || '',
+        endDate: tourData.endDate || '',
+        blackoutDates: tourData.blackoutDates || [],
         createdAt: serverTimestamp()
       };
       
@@ -669,6 +706,120 @@ export default function CreateTourPage() {
               placeholder="Describe the tour package experience..."
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
             />
+          </div>
+        </div>
+
+        {/* Booking Date Settings Card */}
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h2 className="text-xl font-semibold text-black mb-6 pb-3 border-b border-gray-200">Booking Date Settings</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label htmlFor="minAdvanceBookingDays" className="block text-sm font-medium text-black mb-2">
+                Minimum Advance Booking (Days)
+              </label>
+              <input
+                type="number"
+                id="minAdvanceBookingDays"
+                name="minAdvanceBookingDays"
+                min="0"
+                max="30"
+                value={tourData.minAdvanceBookingDays || 3}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
+                placeholder="3"
+              />
+              <p className="mt-1 text-xs text-gray-500">Users must book at least this many days in advance</p>
+            </div>
+            
+            <div>
+              <label htmlFor="maxAdvanceBookingDays" className="block text-sm font-medium text-black mb-2">
+                Maximum Advance Booking (Days)
+              </label>
+              <input
+                type="number"
+                id="maxAdvanceBookingDays"
+                name="maxAdvanceBookingDays"
+                min="30"
+                max="365"
+                value={tourData.maxAdvanceBookingDays || 180}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
+                placeholder="180"
+              />
+              <p className="mt-1 text-xs text-gray-500">Users cannot book more than this many days in advance</p>
+            </div>
+            
+            <div>
+              <label htmlFor="startDate" className="block text-sm font-medium text-black mb-2">
+                Tour Availability Start Date (Optional)
+              </label>
+              <input
+                type="date"
+                id="startDate"
+                name="startDate"
+                value={tourData.startDate || ''}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
+              />
+              <p className="mt-1 text-xs text-gray-500">Leave empty if tour is always available</p>
+            </div>
+            
+            <div>
+              <label htmlFor="endDate" className="block text-sm font-medium text-black mb-2">
+                Tour Availability End Date (Optional)
+              </label>
+              <input
+                type="date"
+                id="endDate"
+                name="endDate"
+                value={tourData.endDate || ''}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
+              />
+              <p className="mt-1 text-xs text-gray-500">Leave empty if tour is always available</p>
+            </div>
+          </div>
+          
+          <div className="mt-6">
+            <label htmlFor="blackoutDate" className="block text-sm font-medium text-black mb-2">
+              Blackout Dates (Unavailable Dates)
+            </label>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="date"
+                id="blackoutDate"
+                value={blackoutDateInput}
+                onChange={(e) => setBlackoutDateInput(e.target.value)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
+              />
+              <button
+                type="button"
+                onClick={addBlackoutDate}
+                className="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Add Date
+              </button>
+            </div>
+            {tourData.blackoutDates && tourData.blackoutDates.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {tourData.blackoutDates.map((date, index) => (
+                  <span
+                    key={index}
+                    className="inline-flex items-center px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm"
+                  >
+                    {new Date(date).toLocaleDateString()}
+                    <button
+                      type="button"
+                      onClick={() => removeBlackoutDate(date)}
+                      className="ml-2 text-red-600 hover:text-red-800"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-xs text-gray-500">Add dates when this tour is not available (e.g., holidays, maintenance)</p>
           </div>
         </div>
 

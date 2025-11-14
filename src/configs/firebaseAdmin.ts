@@ -28,7 +28,7 @@ function initializeAdminFirestore() {
   if (!getApps().length) {
     let serviceAccount: any = null;
     
-    // Try environment variable first (for Vercel)
+    // Try environment variable first (for Vercel/production)
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       try {
         serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -37,8 +37,37 @@ function initializeAdminFirestore() {
       }
     }
     
+    // Try loading from file path (for local development)
+    if (!serviceAccount) {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        
+        // Try multiple possible paths
+        const possiblePaths = [
+          path.join(process.cwd(), '..', 'backend', 'go-smart-travel-app-firebase-adminsdk-fbsvc-e0998c1e3a.json'),
+          path.join(process.cwd(), 'backend', 'go-smart-travel-app-firebase-adminsdk-fbsvc-e0998c1e3a.json'),
+          path.join(process.cwd(), '..', '..', 'backend', 'go-smart-travel-app-firebase-adminsdk-fbsvc-e0998c1e3a.json'),
+          path.join(process.cwd(), 'go-smart-travel-app-firebase-adminsdk-fbsvc-e0998c1e3a.json'),
+        ];
+        
+        for (const filePath of possiblePaths) {
+          if (fs.existsSync(filePath)) {
+            const fileContent = fs.readFileSync(filePath, 'utf8');
+            serviceAccount = JSON.parse(fileContent);
+            console.log('✅ Loaded Firebase Admin service account from:', filePath);
+            break;
+          }
+        }
+      } catch (err: any) {
+        // Silently fail - will try other methods or return null
+        console.log('ℹ️ Could not load Firebase Admin from file, will use env var if available');
+      }
+    }
+    
     // If no service account, return null (will be handled gracefully)
     if (!serviceAccount) {
+      console.warn('⚠️ Firebase Admin service account not found. In-app notifications will be skipped.');
       return null;
     }
     
