@@ -20,7 +20,7 @@ export default function RevenueReport() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [revenueData, setRevenueData] = useState<any>(null);
-  const [timeRange, setTimeRange] = useState('yearly');
+  const [timeRange, setTimeRange] = useState('monthly'); // 'weekly', 'monthly', 'yearly'
   
   useEffect(() => {
     const fetchRevenueData = async () => {
@@ -31,12 +31,13 @@ export default function RevenueReport() {
         const now = new Date();
         let startDate = new Date();
         
-        if (timeRange === 'monthly') {
-          // Past 6 months
-          startDate.setMonth(now.getMonth() - 6);
-        } else if (timeRange === 'quarterly') {
-          // Past 4 quarters (1 year)
+        if (timeRange === 'weekly') {
+          // Current month
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        } else if (timeRange === 'monthly') {
+          // Past 12 months
           startDate.setFullYear(now.getFullYear() - 1);
+          startDate.setMonth(now.getMonth());
         } else {
           // Past 3 years
           startDate.setFullYear(now.getFullYear() - 3);
@@ -69,7 +70,7 @@ export default function RevenueReport() {
           .filter(booking => booking.paymentStatus === 'paid'); // Only include paid bookings
         
         // Process revenue data based on time range
-        const processedData = processRevenueData(bookings, timeRange);
+        const processedData = processRevenueData(bookings, timeRange, now);
         
         // Calculate financial summary
         const currYearBookings = bookings.filter(booking => {
@@ -120,8 +121,8 @@ export default function RevenueReport() {
         };
         
         setRevenueData({
+          weekly: processedData.weeklyData,
           monthly: processedData.monthlyData,
-          quarterly: processedData.quarterlyData,
           yearly: processedData.yearlyData,
           financialSummary
         });
@@ -130,8 +131,8 @@ export default function RevenueReport() {
         console.error('Error fetching revenue data:', error);
         // Set fallback data if there's an error
         setRevenueData({
+          weekly: [],
           monthly: [],
-          quarterly: [],
           yearly: [],
           financialSummary: {
             totalRevenue: '₱0',
@@ -148,99 +149,137 @@ export default function RevenueReport() {
     fetchRevenueData();
   }, [timeRange]);
   
-  // Helper function to process revenue data based on time range
-  const processRevenueData = (bookings: any[], timeRange: string) => {
+  // Helper function to get date range label for chart titles
+  const getDateRangeLabel = () => {
     const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      // Show current month name and year
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return monthName; // e.g., "December 2025"
+    } else if (timeRange === 'monthly') {
+      // Show current year
+      return now.getFullYear().toString(); // e.g., "2025"
+    } else {
+      // Show year range
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2; // Last 3 years
+      
+      if (startYear === currentYear) {
+        return currentYear.toString(); // Single year
+      } else {
+        return `${startYear}–${currentYear}`; // Year range
+      }
+    }
+  };
+
+  // Helper function to get date range info for statistics
+  const getDateRangeInfo = () => {
+    const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return `Month: ${monthName}`;
+    } else if (timeRange === 'monthly') {
+      return `Year: ${now.getFullYear()}`;
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return `Year: ${currentYear}`;
+      } else {
+        return `Years: ${startYear}–${currentYear}`;
+      }
+    }
+  };
+
+  // Helper function to process revenue data based on time range
+  const processRevenueData = (bookings: any[], timeRange: string, now: Date) => {
+    const weeklyData: any[] = [];
     const monthlyData: any[] = [];
-    const quarterlyData: any[] = [];
     const yearlyData: any[] = [];
     
-    // Monthly data - Get last 6 months
-    for (let i = 5; i >= 0; i--) {
-      const monthDate = new Date(now);
-      monthDate.setMonth(now.getMonth() - i);
-      const monthKey = monthDate.toLocaleDateString('en-US', { month: 'short' });
-      
-      const monthBookings = bookings.filter(booking => {
-        if (!booking.createdAt) return false;
-        // Handle both Firestore Timestamp and string dates
-        const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
-        return bookingDate.getMonth() === monthDate.getMonth() && 
-               bookingDate.getFullYear() === monthDate.getFullYear();
-      });
-      
-      const revenue = monthBookings.reduce((sum, booking) => sum + booking.amount, 0);
-      const bookingCount = monthBookings.length;
-      const avgBookingValue = bookingCount > 0 ? revenue / bookingCount : 0;
-      
-      monthlyData.push({
-        month: monthKey,
-        revenue,
-        bookings: bookingCount,
-        avgBookingValue
-      });
+    // Weekly data - Get current month's weeks
+    if (timeRange === 'weekly') {
+      for (let i = 1; i <= 4; i++) {
+        const weekStart = new Date(now.getFullYear(), now.getMonth(), (i - 1) * 7 + 1);
+        const weekEnd = new Date(now.getFullYear(), now.getMonth(), Math.min(i * 7, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()));
+        
+        const weekBookings = bookings.filter(booking => {
+          if (!booking.createdAt) return false;
+          const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
+          return bookingDate >= weekStart && bookingDate <= weekEnd &&
+                 bookingDate.getMonth() === now.getMonth() &&
+                 bookingDate.getFullYear() === now.getFullYear();
+        });
+        
+        const revenue = weekBookings.reduce((sum, booking) => sum + booking.amount, 0);
+        const bookingCount = weekBookings.length;
+        const avgBookingValue = bookingCount > 0 ? revenue / bookingCount : 0;
+        
+        weeklyData.push({
+          week: `Week ${i}`,
+          revenue,
+          bookings: bookingCount,
+          avgBookingValue
+        });
+      }
     }
     
-    // Quarterly data - Get last 4 quarters
-    for (let i = 3; i >= 0; i--) {
-      const quarterDate = new Date(now);
-      quarterDate.setMonth(now.getMonth() - (i * 3));
-      const quarter = Math.floor(quarterDate.getMonth() / 3) + 1;
-      const year = quarterDate.getFullYear();
-      
-      const startMonth = (quarter - 1) * 3;
-      const endMonth = startMonth + 2;
-      
-      const quarterBookings = bookings.filter(booking => {
-        if (!booking.createdAt) return false;
-        // Handle both Firestore Timestamp and string dates
-        const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
-        const bookingMonth = bookingDate.getMonth();
-        return bookingDate.getFullYear() === year && 
-               bookingMonth >= startMonth && bookingMonth <= endMonth;
-      });
-      
-      const revenue = quarterBookings.reduce((sum, booking) => sum + booking.amount, 0);
-      const bookingCount = quarterBookings.length;
-      const avgBookingValue = bookingCount > 0 ? revenue / bookingCount : 0;
-      
-      quarterlyData.push({
-        quarter: `Q${quarter} ${year}`,
-        revenue,
-        bookings: bookingCount,
-        avgBookingValue
-      });
+    // Monthly data - Get last 12 months
+    if (timeRange === 'monthly') {
+      for (let i = 11; i >= 0; i--) {
+        const monthDate = new Date(now);
+        monthDate.setMonth(now.getMonth() - i);
+        const monthKey = monthDate.toLocaleDateString('en-US', { month: 'short' });
+        
+        const monthBookings = bookings.filter(booking => {
+          if (!booking.createdAt) return false;
+          const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
+          return bookingDate.getMonth() === monthDate.getMonth() && 
+                 bookingDate.getFullYear() === monthDate.getFullYear();
+        });
+        
+        const revenue = monthBookings.reduce((sum, booking) => sum + booking.amount, 0);
+        const bookingCount = monthBookings.length;
+        const avgBookingValue = bookingCount > 0 ? revenue / bookingCount : 0;
+        
+        monthlyData.push({
+          month: monthKey,
+          revenue,
+          bookings: bookingCount,
+          avgBookingValue
+        });
+      }
     }
     
-    // Yearly data - Get last 3 years plus current YTD
-    for (let i = 2; i >= 0; i--) {
-      const yearDate = new Date(now);
-      yearDate.setFullYear(now.getFullYear() - i);
-      
-      const yearBookings = bookings.filter(booking => {
-        if (!booking.createdAt) return false;
-        // Handle both Firestore Timestamp and string dates
-        const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
-        return bookingDate.getFullYear() === yearDate.getFullYear();
-      });
-      
-      const revenue = yearBookings.reduce((sum, booking) => sum + booking.amount, 0);
-      const bookingCount = yearBookings.length;
-      const avgBookingValue = bookingCount > 0 ? revenue / bookingCount : 0;
-      
-      const yearLabel = yearDate.getFullYear() === now.getFullYear() 
-        ? `${yearDate.getFullYear()} (YTD)` 
-        : `${yearDate.getFullYear()}`;
-      
-      yearlyData.push({
-        year: yearLabel,
-        revenue,
-        bookings: bookingCount,
-        avgBookingValue
-      });
+    // Yearly data - Get last 3 years
+    if (timeRange === 'yearly') {
+      for (let i = 2; i >= 0; i--) {
+        const yearDate = new Date(now);
+        yearDate.setFullYear(now.getFullYear() - i);
+        
+        const yearBookings = bookings.filter(booking => {
+          if (!booking.createdAt) return false;
+          const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
+          return bookingDate.getFullYear() === yearDate.getFullYear();
+        });
+        
+        const revenue = yearBookings.reduce((sum, booking) => sum + booking.amount, 0);
+        const bookingCount = yearBookings.length;
+        const avgBookingValue = bookingCount > 0 ? revenue / bookingCount : 0;
+        
+        yearlyData.push({
+          year: yearDate.getFullYear().toString(),
+          revenue,
+          bookings: bookingCount,
+          avgBookingValue
+        });
+      }
     }
     
-    return { monthlyData, quarterlyData, yearlyData };
+    return { weeklyData, monthlyData, yearlyData };
   };
   
   // Function to export the report as CSV
@@ -262,14 +301,14 @@ export default function RevenueReport() {
       csvContent += "Projected Annual Revenue," + revenueData.financialSummary.projectedAnnual + "\r\n\r\n";
       
       // Add time-based revenue data
-      const activeData = timeRange === 'monthly' ? revenueData.monthly 
-                        : timeRange === 'quarterly' ? revenueData.quarterly 
+      const activeData = timeRange === 'weekly' ? revenueData.weekly
+                        : timeRange === 'monthly' ? revenueData.monthly 
                         : revenueData.yearly;
       
       csvContent += "Revenue Over Time\r\n";
       csvContent += "Period,Revenue\r\n";
       activeData.forEach((item: any) => {
-        const period = item.name || item.quarter || item.year;
+        const period = item.week || item.month || item.year;
         csvContent += `${period},${item.revenue}\r\n`;
       });
       
@@ -293,27 +332,27 @@ export default function RevenueReport() {
     if (!revenueData) return [];
     
     switch (timeRange) {
+      case 'weekly':
+        return revenueData.weekly;
       case 'monthly':
         return revenueData.monthly;
-      case 'quarterly':
-        return revenueData.quarterly;
       case 'yearly':
         return revenueData.yearly;
       default:
-        return revenueData.yearly;
+        return revenueData.monthly;
     }
   };
   
   const getDataKey = () => {
     switch (timeRange) {
+      case 'weekly':
+        return 'week';
       case 'monthly':
         return 'month';
-      case 'quarterly':
-        return 'quarter';
       case 'yearly':
         return 'year';
       default:
-        return 'year';
+        return 'month';
     }
   };
   
@@ -362,16 +401,16 @@ export default function RevenueReport() {
           <span className="text-gray-700 mr-4">Time Range:</span>
           <div className="flex space-x-2">
             <button 
+              onClick={() => setTimeRange('weekly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'weekly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Weekly
+            </button>
+            <button 
               onClick={() => setTimeRange('monthly')} 
               className={`px-3 py-1 rounded text-sm ${timeRange === 'monthly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
             >
               Monthly
-            </button>
-            <button 
-              onClick={() => setTimeRange('quarterly')} 
-              className={`px-3 py-1 rounded text-sm ${timeRange === 'quarterly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-            >
-              Quarterly
             </button>
             <button 
               onClick={() => setTimeRange('yearly')} 
@@ -381,6 +420,11 @@ export default function RevenueReport() {
             </button>
           </div>
         </div>
+      </div>
+      
+      {/* Date range info */}
+      <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+        <p className="text-blue-700 text-sm font-medium">{getDateRangeInfo()}</p>
       </div>
       
       {/* Financial summary */}
@@ -408,7 +452,14 @@ export default function RevenueReport() {
       
       {/* Revenue over time chart */}
       <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300 mb-8">
-        <h3 className="text-lg font-medium text-gray-700 mb-4">Revenue Trend</h3>
+        <h3 className="text-lg font-medium text-gray-700 mb-4">
+          {timeRange === 'weekly' 
+            ? `Weekly Revenue - ${getDateRangeLabel()}`
+            : timeRange === 'monthly'
+            ? `Monthly Revenue - ${getDateRangeLabel()}`
+            : `Yearly Revenue${getDateRangeLabel().includes('–') ? ` (${getDateRangeLabel()})` : ` - ${getDateRangeLabel()}`}`
+          }
+        </h3>
         
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
@@ -444,7 +495,14 @@ export default function RevenueReport() {
       {/* Average booking value trend */}
       <div className="mb-8">
         <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300">
-          <h3 className="text-lg font-medium text-gray-700 mb-4">Average Booking Value Trend</h3>
+          <h3 className="text-lg font-medium text-gray-700 mb-4">
+            {timeRange === 'weekly' 
+              ? `Average Booking Value - ${getDateRangeLabel()}`
+              : timeRange === 'monthly'
+              ? `Average Booking Value - ${getDateRangeLabel()}`
+              : `Average Booking Value${getDateRangeLabel().includes('–') ? ` (${getDateRangeLabel()})` : ` - ${getDateRangeLabel()}`}`
+            }
+          </h3>
           
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">

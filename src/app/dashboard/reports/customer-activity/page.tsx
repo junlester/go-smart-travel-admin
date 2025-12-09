@@ -24,6 +24,49 @@ export default function CustomerActivityReport() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [activityData, setActivityData] = useState<any>(null);
+  const [timeRange, setTimeRange] = useState('monthly'); // 'weekly', 'monthly', 'yearly'
+  
+  // Helper function to get date range label for chart titles
+  const getDateRangeLabel = () => {
+    const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return monthName;
+    } else if (timeRange === 'monthly') {
+      return now.getFullYear().toString();
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return currentYear.toString();
+      } else {
+        return `${startYear}–${currentYear}`;
+      }
+    }
+  };
+
+  // Helper function to get date range info for statistics
+  const getDateRangeInfo = () => {
+    const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return `Month: ${monthName}`;
+    } else if (timeRange === 'monthly') {
+      return `Year: ${now.getFullYear()}`;
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return `Year: ${currentYear}`;
+      } else {
+        return `Years: ${startYear}–${currentYear}`;
+      }
+    }
+  };
   
   useEffect(() => {
     const fetchActivityData = async () => {
@@ -32,11 +75,22 @@ export default function CustomerActivityReport() {
         
         // Get current date for date calculations
         const now = new Date();
-        const sixMonthsAgo = new Date(now);
-        sixMonthsAgo.setMonth(now.getMonth() - 6);
+        let startDate = new Date();
+        
+        if (timeRange === 'weekly') {
+          // Current month
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        } else if (timeRange === 'monthly') {
+          // Last 12 months
+          startDate.setFullYear(now.getFullYear() - 1);
+          startDate.setMonth(now.getMonth());
+        } else {
+          // Last 3 years
+          startDate.setFullYear(now.getFullYear() - 3);
+        }
         
         // Convert to Firestore timestamps
-        const startTimestamp = Timestamp.fromDate(sixMonthsAgo);
+        const startTimestamp = Timestamp.fromDate(startDate);
         const endTimestamp = Timestamp.fromDate(now);
 
         // 1. Fetch user activity data
@@ -52,26 +106,50 @@ export default function CustomerActivityReport() {
           ...doc.data() as UserData
         }));
         
-        // Process user data by month
-        const monthlyUserData: {[key: string]: {activeUsers: number, newUsers: number}} = {};
+        // Process user data by time period
+        const periodUserData: {[key: string]: {activeUsers: number, newUsers: number}} = {};
         
-        // Initialize with the past 6 months
-        for (let i = 5; i >= 0; i--) {
-          const d = new Date(now);
-          d.setMonth(now.getMonth() - i);
-          const monthKey = d.toLocaleDateString('en-US', { month: 'short' });
-          monthlyUserData[monthKey] = { activeUsers: 0, newUsers: 0 };
+        if (timeRange === 'weekly') {
+          // Initialize with current month's weeks
+          for (let i = 1; i <= 4; i++) {
+            periodUserData[`Week ${i}`] = { activeUsers: 0, newUsers: 0 };
+          }
+        } else if (timeRange === 'monthly') {
+          // Initialize with the past 12 months
+          for (let i = 11; i >= 0; i--) {
+            const d = new Date(now);
+            d.setMonth(now.getMonth() - i);
+            const monthKey = d.toLocaleDateString('en-US', { month: 'short' });
+            periodUserData[monthKey] = { activeUsers: 0, newUsers: 0 };
+          }
+        } else {
+          // Initialize with the past 3 years
+          for (let i = 2; i >= 0; i--) {
+            const d = new Date(now);
+            d.setFullYear(now.getFullYear() - i);
+            periodUserData[d.getFullYear().toString()] = { activeUsers: 0, newUsers: 0 };
+          }
         }
         
-        // Count new users per month
+        // Count new users per period
         users.forEach(user => {
           if (user.createdAt) {
-            // Handle both Firestore Timestamp and string dates
             const userDate = user.createdAt.toDate ? user.createdAt.toDate() : new Date(user.createdAt);
-            const monthKey = userDate.toLocaleDateString('en-US', { month: 'short' });
+            let periodKey = '';
             
-            if (monthlyUserData[monthKey]) {
-              monthlyUserData[monthKey].newUsers += 1;
+            if (timeRange === 'weekly') {
+              const weekOfMonth = Math.ceil(userDate.getDate() / 7);
+              if (weekOfMonth <= 4 && userDate.getMonth() === now.getMonth() && userDate.getFullYear() === now.getFullYear()) {
+                periodKey = `Week ${weekOfMonth}`;
+              }
+            } else if (timeRange === 'monthly') {
+              periodKey = userDate.toLocaleDateString('en-US', { month: 'short' });
+            } else {
+              periodKey = userDate.getFullYear().toString();
+            }
+            
+            if (periodKey && periodUserData[periodKey]) {
+              periodUserData[periodKey].newUsers += 1;
             }
           }
         });
@@ -93,28 +171,38 @@ export default function CustomerActivityReport() {
         const activeUserIds = new Set<string>();
         const monthlyActiveUsers: {[key: string]: Set<string>} = {};
         
-        // Initialize monthly active users sets
-        Object.keys(monthlyUserData).forEach(month => {
-          monthlyActiveUsers[month] = new Set<string>();
+        // Initialize period active users sets
+        Object.keys(periodUserData).forEach(period => {
+          monthlyActiveUsers[period] = new Set<string>();
         });
         
         bookings.forEach(booking => {
           if (booking.createdAt && booking.userId) {
-            // Handle both Firestore Timestamp and string dates
             const bookingDate = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
-            const monthKey = bookingDate.toLocaleDateString('en-US', { month: 'short' });
+            let periodKey = '';
             
-            if (monthlyUserData[monthKey]) {
+            if (timeRange === 'weekly') {
+              const weekOfMonth = Math.ceil(bookingDate.getDate() / 7);
+              if (weekOfMonth <= 4 && bookingDate.getMonth() === now.getMonth() && bookingDate.getFullYear() === now.getFullYear()) {
+                periodKey = `Week ${weekOfMonth}`;
+              }
+            } else if (timeRange === 'monthly') {
+              periodKey = bookingDate.toLocaleDateString('en-US', { month: 'short' });
+            } else {
+              periodKey = bookingDate.getFullYear().toString();
+            }
+            
+            if (periodKey && periodUserData[periodKey]) {
               activeUserIds.add(booking.userId);
-              monthlyActiveUsers[monthKey].add(booking.userId);
-              monthlyUserData[monthKey].activeUsers = monthlyActiveUsers[monthKey].size;
+              monthlyActiveUsers[periodKey].add(booking.userId);
+              periodUserData[periodKey].activeUsers = monthlyActiveUsers[periodKey].size;
             }
           }
         });
         
         // Create array format for the chart
-        const userEngagement = Object.entries(monthlyUserData).map(([month, data]) => ({
-          month,
+        const userEngagement = Object.entries(periodUserData).map(([period, data]) => ({
+          period,
           activeUsers: data.activeUsers, 
           newUsers: data.newUsers
         }));
@@ -190,7 +278,7 @@ export default function CustomerActivityReport() {
     };
     
     fetchActivityData();
-  }, []);
+  }, [timeRange]);
   
   // Function to export the report as CSV
   const exportCSV = () => {
@@ -301,9 +389,48 @@ export default function CustomerActivityReport() {
         </div>
       </div>
       
+      {/* Time range filter */}
+      <div className="mb-8 bg-white p-4 rounded-lg border border-gray-300">
+        <div className="flex items-center">
+          <span className="text-gray-700 mr-4">Time Range:</span>
+          <div className="flex space-x-2">
+            <button 
+              onClick={() => setTimeRange('weekly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'weekly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Weekly
+            </button>
+            <button 
+              onClick={() => setTimeRange('monthly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'monthly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Monthly
+            </button>
+            <button 
+              onClick={() => setTimeRange('yearly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'yearly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Yearly
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      {/* Date range info */}
+      <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+        <p className="text-blue-700 text-sm font-medium">{getDateRangeInfo()}</p>
+      </div>
+
       {/* User Engagement Chart */}
       <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300 mb-8">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Monthly User Engagement</h3>
+        <h3 className="text-lg font-medium text-gray-900 mb-4">
+          {timeRange === 'weekly' 
+            ? `Weekly User Engagement - ${getDateRangeLabel()}`
+            : timeRange === 'monthly'
+            ? `Monthly User Engagement - ${getDateRangeLabel()}`
+            : `Yearly User Engagement${getDateRangeLabel().includes('–') ? ` (${getDateRangeLabel()})` : ` - ${getDateRangeLabel()}`}`
+          }
+        </h3>
         
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
@@ -313,7 +440,7 @@ export default function CustomerActivityReport() {
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis 
-                dataKey="month" 
+                dataKey="period" 
                 tick={{ fill: '#374151' }}
                 tickLine={{ stroke: '#374151' }}
                 axisLine={{ stroke: '#374151' }}

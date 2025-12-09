@@ -839,7 +839,9 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Monthly Revenue Chart */}
           <div className="bg-white rounded-lg shadow-md border border-gray-300 p-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-4">Monthly Revenue</h3>
+            <h3 className="text-xl font-semibold text-gray-900 mb-4">
+              Monthly Revenue - {new Date().getFullYear()}
+            </h3>
             {analyticsLoading ? (
               <div className="flex justify-center items-center h-64">
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-500"></div>
@@ -880,7 +882,9 @@ export default function DashboardPage() {
           
           {/* Peak Booking Months Chart */}
           <div className="bg-white rounded-lg shadow-md border border-gray-300 p-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-4">Peak Booking Months</h3>
+            <h3 className="text-xl font-semibold text-gray-900 mb-4">
+              Peak Booking Months - {new Date().getFullYear()}
+            </h3>
             {analyticsLoading ? (
               <div className="flex justify-center items-center h-64">
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>

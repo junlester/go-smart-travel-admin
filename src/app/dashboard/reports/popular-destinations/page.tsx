@@ -3,9 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/configs/firebase';
-import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import Image from 'next/image';
 
 // Define interfaces for the data types
 interface TourData {
@@ -34,11 +33,69 @@ export default function PopularDestinationsReport() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [destinationData, setDestinationData] = useState<any>(null);
+  const [timeRange, setTimeRange] = useState('monthly'); // 'weekly', 'monthly', 'yearly'
+  
+  // Helper function to get date range label for chart titles
+  const getDateRangeLabel = () => {
+    const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return monthName;
+    } else if (timeRange === 'monthly') {
+      return now.getFullYear().toString();
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return currentYear.toString();
+      } else {
+        return `${startYear}–${currentYear}`;
+      }
+    }
+  };
+
+  // Helper function to get date range info for statistics
+  const getDateRangeInfo = () => {
+    const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return `Month: ${monthName}`;
+    } else if (timeRange === 'monthly') {
+      return `Year: ${now.getFullYear()}`;
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return `Year: ${currentYear}`;
+      } else {
+        return `Years: ${startYear}–${currentYear}`;
+      }
+    }
+  };
   
   useEffect(() => {
     const fetchDestinationData = async () => {
       try {
         setLoading(true);
+        
+        const now = new Date();
+        let startDate = new Date();
+        
+        if (timeRange === 'weekly') {
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        } else if (timeRange === 'monthly') {
+          startDate.setFullYear(now.getFullYear() - 1);
+          startDate.setMonth(now.getMonth());
+        } else {
+          startDate.setFullYear(now.getFullYear() - 3);
+        }
+        
+        const startTimestamp = Timestamp.fromDate(startDate);
+        const endTimestamp = Timestamp.fromDate(now);
         
         // Fetch all tours
         const toursSnapshot = await getDocs(collection(db, 'tours'));
@@ -47,8 +104,14 @@ export default function PopularDestinationsReport() {
           ...doc.data() as TourData
         }));
         
-        // Fetch all bookings to count per tour
-        const bookingsSnapshot = await getDocs(collection(db, 'bookings'));
+        // Fetch bookings within date range
+        const bookingsQuery = query(
+          collection(db, 'bookings'),
+          where('createdAt', '>=', startTimestamp),
+          where('createdAt', '<=', endTimestamp),
+          orderBy('createdAt', 'asc')
+        );
+        const bookingsSnapshot = await getDocs(bookingsQuery);
         const bookings = bookingsSnapshot.docs.map(doc => doc.data() as BookingData);
         
         // Count bookings per tour
@@ -140,28 +203,79 @@ export default function PopularDestinationsReport() {
           percentage: totalCategoryCount > 0 ? Math.round((count / totalCategoryCount) * 100) : 20
         }));
         
-        // Process seasonal trends - analyze bookings by month
-        // Count bookings by month
-        const monthCounts: {[month: string]: number} = {
-          'Jan': 0, 'Feb': 0, 'Mar': 0, 'Apr': 0, 'May': 0, 'Jun': 0,
-          'Jul': 0, 'Aug': 0, 'Sep': 0, 'Oct': 0, 'Nov': 0, 'Dec': 0
-        };
+        // Process seasonal trends based on time range
+        let seasonalTrends: any[] = [];
         
-        bookings.forEach(booking => {
-          if (booking.createdAt) {
-            // Handle both Firestore Timestamp and string dates
-            const date = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
-            const month = date.toLocaleDateString('en-US', { month: 'short' });
-            if (monthCounts[month] !== undefined) {
-              monthCounts[month] += 1;
+        if (timeRange === 'weekly') {
+          // Current month's weeks
+          const weekCounts: {[week: string]: number} = {
+            'Week 1': 0, 'Week 2': 0, 'Week 3': 0, 'Week 4': 0
+          };
+          
+          bookings.forEach(booking => {
+            if (booking.createdAt) {
+              const date = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
+              if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
+                const weekOfMonth = Math.ceil(date.getDate() / 7);
+                if (weekOfMonth <= 4) {
+                  const weekKey = `Week ${weekOfMonth}`;
+                  if (weekCounts[weekKey] !== undefined) {
+                    weekCounts[weekKey] += 1;
+                  }
+                }
+              }
             }
+          });
+          
+          seasonalTrends = Object.entries(weekCounts).map(([week, count]) => ({
+            period: week,
+            bookings: count
+          }));
+        } else if (timeRange === 'monthly') {
+          // Last 12 months
+          const monthCounts: {[month: string]: number} = {
+            'Jan': 0, 'Feb': 0, 'Mar': 0, 'Apr': 0, 'May': 0, 'Jun': 0,
+            'Jul': 0, 'Aug': 0, 'Sep': 0, 'Oct': 0, 'Nov': 0, 'Dec': 0
+          };
+          
+          bookings.forEach(booking => {
+            if (booking.createdAt) {
+              const date = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
+              const month = date.toLocaleDateString('en-US', { month: 'short' });
+              if (monthCounts[month] !== undefined) {
+                monthCounts[month] += 1;
+              }
+            }
+          });
+          
+          seasonalTrends = Object.entries(monthCounts).map(([month, count]) => ({
+            period: month,
+            bookings: count
+          }));
+        } else {
+          // Last 3 years
+          const yearCounts: {[year: string]: number} = {};
+          
+          for (let i = 2; i >= 0; i--) {
+            const year = now.getFullYear() - i;
+            yearCounts[year.toString()] = 0;
           }
-        });
-        
-        const seasonalTrends = Object.entries(monthCounts).map(([month, bookings]) => ({
-          month,
-          bookings
-        }));
+          
+          bookings.forEach(booking => {
+            if (booking.createdAt) {
+              const date = booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt);
+              const year = date.getFullYear().toString();
+              if (yearCounts[year] !== undefined) {
+                yearCounts[year] += 1;
+              }
+            }
+          });
+          
+          seasonalTrends = Object.entries(yearCounts).map(([year, count]) => ({
+            period: year,
+            bookings: count
+          }));
+        }
         
         // Set all data
         setDestinationData({
@@ -188,18 +302,10 @@ export default function PopularDestinationsReport() {
             { name: 'Mindanao', value: 20 }
           ],
           seasonalTrends: [
-            { month: 'Jan', bookings: 0 },
-            { month: 'Feb', bookings: 0 },
-            { month: 'Mar', bookings: 0 },
-            { month: 'Apr', bookings: 0 },
-            { month: 'May', bookings: 0 },
-            { month: 'Jun', bookings: 0 },
-            { month: 'Jul', bookings: 0 },
-            { month: 'Aug', bookings: 0 },
-            { month: 'Sep', bookings: 0 },
-            { month: 'Oct', bookings: 0 },
-            { month: 'Nov', bookings: 0 },
-            { month: 'Dec', bookings: 0 }
+            { period: 'Week 1', bookings: 0 },
+            { period: 'Week 2', bookings: 0 },
+            { period: 'Week 3', bookings: 0 },
+            { period: 'Week 4', bookings: 0 }
           ],
           bookingMotivations: [
             { reason: 'Beach/Islands', percentage: 62 },
@@ -215,7 +321,7 @@ export default function PopularDestinationsReport() {
     };
     
     fetchDestinationData();
-  }, []);
+  }, [timeRange]);
   
   // Function to export the report as CSV
   const exportCSV = () => {
@@ -254,9 +360,9 @@ export default function PopularDestinationsReport() {
       
       // Add seasonal trends data
       csvContent += "Seasonal Trends\r\n";
-      csvContent += "Month,Bookings\r\n";
+      csvContent += "Period,Bookings\r\n";
       destinationData.seasonalTrends.forEach((item: any) => {
-        csvContent += `${item.month},${item.bookings}\r\n`;
+        csvContent += `${item.period},${item.bookings}\r\n`;
       });
       
       // Create download link
@@ -321,14 +427,25 @@ export default function PopularDestinationsReport() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
           {destinationData.topDestinations.map((destination: any, index: number) => (
             <div key={index} className="bg-white rounded-lg shadow-md border border-gray-300 overflow-hidden">
-              <div className="relative h-40 w-full">
-                <div className="absolute inset-0 bg-gray-100 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                  </svg>
-                </div>
-                {/* Note: In a real app, you would use actual images here */}
-                {/* <Image src={destination.image} alt={destination.name} layout="fill" objectFit="cover" /> */}
+              <div className="relative h-40 w-full bg-gray-100">
+                {destination.image && destination.image !== '/assets/images/samples/placeholder.jpg' ? (
+                  <img 
+                    src={destination.image} 
+                    alt={destination.name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      // Fallback to placeholder if image fails to load
+                      const target = e.target as HTMLImageElement;
+                      target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="100" height="100"%3E%3Crect width="100" height="100" fill="%23e5e7eb"/%3E%3Cpath d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="%239ca3af" stroke-width="2" fill="none"/%3E%3C/svg%3E';
+                    }}
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                    </svg>
+                  </div>
+                )}
               </div>
               
               <div className="p-4">
@@ -425,9 +542,48 @@ export default function PopularDestinationsReport() {
         </div>
       </div>
       
+      {/* Time range filter */}
+      <div className="mb-8 bg-white p-4 rounded-lg border border-gray-300">
+        <div className="flex items-center">
+          <span className="text-gray-700 mr-4">Time Range:</span>
+          <div className="flex space-x-2">
+            <button 
+              onClick={() => setTimeRange('weekly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'weekly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Weekly
+            </button>
+            <button 
+              onClick={() => setTimeRange('monthly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'monthly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Monthly
+            </button>
+            <button 
+              onClick={() => setTimeRange('yearly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'yearly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Yearly
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      {/* Date range info */}
+      <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+        <p className="text-blue-700 text-sm font-medium">{getDateRangeInfo()}</p>
+      </div>
+
       {/* Seasonal trends */}
       <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300 mb-8">
-        <h3 className="text-lg font-medium text-gray-700 mb-4">Seasonal Booking Trends</h3>
+        <h3 className="text-lg font-medium text-gray-700 mb-4">
+          {timeRange === 'weekly' 
+            ? `Weekly Booking Trends - ${getDateRangeLabel()}`
+            : timeRange === 'monthly'
+            ? `Monthly Booking Trends - ${getDateRangeLabel()}`
+            : `Yearly Booking Trends${getDateRangeLabel().includes('–') ? ` (${getDateRangeLabel()})` : ` - ${getDateRangeLabel()}`}`
+          }
+        </h3>
         
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
@@ -437,7 +593,7 @@ export default function PopularDestinationsReport() {
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis 
-                dataKey="month" 
+                dataKey="period" 
                 tick={{ fill: '#374151' }}
                 tickLine={{ stroke: '#374151' }}
                 axisLine={{ stroke: '#374151' }}

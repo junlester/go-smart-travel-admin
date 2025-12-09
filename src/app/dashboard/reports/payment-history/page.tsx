@@ -35,6 +35,49 @@ export default function PaymentHistoryReport() {
   const [loading, setLoading] = useState(true);
   const [paymentData, setPaymentData] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [timeRange, setTimeRange] = useState('monthly'); // 'weekly', 'monthly', 'yearly'
+  
+  // Helper function to get date range label for chart titles
+  const getDateRangeLabel = () => {
+    const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return monthName;
+    } else if (timeRange === 'monthly') {
+      return now.getFullYear().toString();
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return currentYear.toString();
+      } else {
+        return `${startYear}–${currentYear}`;
+      }
+    }
+  };
+
+  // Helper function to get date range info for statistics
+  const getDateRangeInfo = () => {
+    const now = new Date();
+    
+    if (timeRange === 'weekly') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return `Month: ${monthName}`;
+    } else if (timeRange === 'monthly') {
+      return `Year: ${now.getFullYear()}`;
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return `Year: ${currentYear}`;
+      } else {
+        return `Years: ${startYear}–${currentYear}`;
+      }
+    }
+  };
   
   // Format price with commas and peso sign, without decimals
   const formatPrice = (price: number): string => {
@@ -48,12 +91,25 @@ export default function PaymentHistoryReport() {
         
         // Get current date for date calculations
         const now = new Date();
-        const tenDaysAgo = new Date(now);
-        tenDaysAgo.setDate(now.getDate() - 10);
+        let startDate = new Date();
+        
+        if (timeRange === 'weekly') {
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        } else if (timeRange === 'monthly') {
+          startDate.setFullYear(now.getFullYear() - 1);
+          startDate.setMonth(now.getMonth());
+        } else {
+          startDate.setFullYear(now.getFullYear() - 3);
+        }
+        
+        const startTimestamp = Timestamp.fromDate(startDate);
+        const endTimestamp = Timestamp.fromDate(now);
         
         // Fetch payment transactions (from bookings collection)
         const bookingsQuery = query(
           collection(db, 'bookings'),
+          where('createdAt', '>=', startTimestamp),
+          where('createdAt', '<=', endTimestamp),
           orderBy('createdAt', 'desc'),
           limit(100) // Limit to last 100 transactions
         );
@@ -144,37 +200,89 @@ export default function PaymentHistoryReport() {
           value: totalStatusCount > 0 ? Math.round((count / totalStatusCount) * 100) : 33
         }));
         
-        // Process daily transaction amounts
-        const dailyAmounts: {[date: string]: number} = {};
+        // Process transaction amounts by time period
+        let periodTransactions: any[] = [];
         
-        // Get last 9 days for chart
-        for (let i = 9; i >= 0; i--) {
-          const d = new Date(now);
-          d.setDate(now.getDate() - i);
-          const dateKey = `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`;
-          dailyAmounts[dateKey] = 0;
-        }
-        
-        // Sum transaction amounts by day
-        transactions.forEach(transaction => {
-          try {
-            const transactionDate = new Date(transaction.date);
-            // Only consider transactions from the last 10 days
-            if (transactionDate >= tenDaysAgo && transactionDate <= now) {
-              const dateKey = `${transactionDate.toLocaleDateString('en-US', { month: 'short' })} ${transactionDate.getDate()}`;
-              if (dailyAmounts[dateKey] !== undefined) {
-                dailyAmounts[dateKey] += transaction.amountValue;
+        if (timeRange === 'weekly') {
+          // Current month's weeks
+          const weekAmounts: {[week: string]: number} = {
+            'Week 1': 0, 'Week 2': 0, 'Week 3': 0, 'Week 4': 0
+          };
+          
+          transactions.forEach(transaction => {
+            try {
+              const transactionDate = new Date(transaction.date);
+              if (transactionDate.getMonth() === now.getMonth() && transactionDate.getFullYear() === now.getFullYear()) {
+                const weekOfMonth = Math.ceil(transactionDate.getDate() / 7);
+                if (weekOfMonth <= 4) {
+                  const weekKey = `Week ${weekOfMonth}`;
+                  if (weekAmounts[weekKey] !== undefined) {
+                    weekAmounts[weekKey] += transaction.amountValue;
+                  }
+                }
               }
+            } catch (error) {
+              // Skip invalid dates
             }
-          } catch (error) {
-            // Skip invalid dates
+          });
+          
+          periodTransactions = Object.entries(weekAmounts).map(([period, amount]) => ({
+            period,
+            amount
+          }));
+        } else if (timeRange === 'monthly') {
+          // Last 12 months
+          const monthAmounts: {[month: string]: number} = {};
+          
+          for (let i = 11; i >= 0; i--) {
+            const d = new Date(now);
+            d.setMonth(now.getMonth() - i);
+            const monthKey = d.toLocaleDateString('en-US', { month: 'short' });
+            monthAmounts[monthKey] = 0;
           }
-        });
-        
-        const dailyTransactions = Object.entries(dailyAmounts).map(([date, amount]) => ({
-          date,
-          amount
-        }));
+          
+          transactions.forEach(transaction => {
+            try {
+              const transactionDate = new Date(transaction.date);
+              const monthKey = transactionDate.toLocaleDateString('en-US', { month: 'short' });
+              if (monthAmounts[monthKey] !== undefined) {
+                monthAmounts[monthKey] += transaction.amountValue;
+              }
+            } catch (error) {
+              // Skip invalid dates
+            }
+          });
+          
+          periodTransactions = Object.entries(monthAmounts).map(([period, amount]) => ({
+            period,
+            amount
+          }));
+        } else {
+          // Last 3 years
+          const yearAmounts: {[year: string]: number} = {};
+          
+          for (let i = 2; i >= 0; i--) {
+            const year = now.getFullYear() - i;
+            yearAmounts[year.toString()] = 0;
+          }
+          
+          transactions.forEach(transaction => {
+            try {
+              const transactionDate = new Date(transaction.date);
+              const yearKey = transactionDate.getFullYear().toString();
+              if (yearAmounts[yearKey] !== undefined) {
+                yearAmounts[yearKey] += transaction.amountValue;
+              }
+            } catch (error) {
+              // Skip invalid dates
+            }
+          });
+          
+          periodTransactions = Object.entries(yearAmounts).map(([period, amount]) => ({
+            period,
+            amount
+          }));
+        }
         
         // Calculate summary metrics
         const totalAmount = transactions.reduce((sum, t) => sum + t.amountValue, 0);
@@ -192,7 +300,7 @@ export default function PaymentHistoryReport() {
           recentTransactions,
           paymentMethods,
           statusDistribution,
-          dailyTransactions,
+          periodTransactions,
           summary
         });
         
@@ -218,16 +326,11 @@ export default function PaymentHistoryReport() {
             { name: 'Pending', value: 22 },
             { name: 'Failed', value: 10 }
           ],
-          dailyTransactions: [
-            { date: 'May 2', amount: 0 },
-            { date: 'May 3', amount: 0 },
-            { date: 'May 4', amount: 0 },
-            { date: 'May 5', amount: 0 },
-            { date: 'May 6', amount: 0 },
-            { date: 'May 7', amount: 0 },
-            { date: 'May 8', amount: 0 },
-            { date: 'May 9', amount: 0 },
-            { date: 'May 10', amount: 0 }
+          periodTransactions: [
+            { period: 'Week 1', amount: 0 },
+            { period: 'Week 2', amount: 0 },
+            { period: 'Week 3', amount: 0 },
+            { period: 'Week 4', amount: 0 }
           ],
           summary: {
             total: '₱0',
@@ -241,7 +344,7 @@ export default function PaymentHistoryReport() {
     };
     
     fetchPaymentData();
-  }, []);
+  }, [timeRange]);
   
   // Filter transactions based on search term
   const filteredTransactions = paymentData?.recentTransactions.filter((transaction: any) => {
@@ -315,11 +418,11 @@ export default function PaymentHistoryReport() {
       });
       csvContent += "\r\n";
       
-      // Add daily transactions data
-      csvContent += "Daily Transactions\r\n";
-      csvContent += "Date,Amount\r\n";
-      paymentData.dailyTransactions.forEach((item: any) => {
-        csvContent += `${item.date},${formatPrice(item.amount)}\r\n`;
+      // Add period transactions data
+      csvContent += "Transactions by Period\r\n";
+      csvContent += "Period,Amount\r\n";
+      paymentData.periodTransactions.forEach((item: any) => {
+        csvContent += `${item.period},${formatPrice(item.amount)}\r\n`;
       });
       csvContent += "\r\n";
       
@@ -471,19 +574,58 @@ export default function PaymentHistoryReport() {
         </div>
       </div>
       
-      {/* Daily transactions chart */}
+      {/* Time range filter */}
+      <div className="mb-8 bg-white p-4 rounded-lg border border-gray-300">
+        <div className="flex items-center">
+          <span className="text-gray-700 mr-4">Time Range:</span>
+          <div className="flex space-x-2">
+            <button 
+              onClick={() => setTimeRange('weekly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'weekly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Weekly
+            </button>
+            <button 
+              onClick={() => setTimeRange('monthly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'monthly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Monthly
+            </button>
+            <button 
+              onClick={() => setTimeRange('yearly')} 
+              className={`px-3 py-1 rounded text-sm ${timeRange === 'yearly' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              Yearly
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      {/* Date range info */}
+      <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+        <p className="text-blue-700 text-sm font-medium">{getDateRangeInfo()}</p>
+      </div>
+
+      {/* Period transactions chart */}
       <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300 mb-8">
-        <h3 className="text-lg font-medium text-gray-700 mb-4">Daily Transaction Volume</h3>
+        <h3 className="text-lg font-medium text-gray-700 mb-4">
+          {timeRange === 'weekly' 
+            ? `Weekly Transaction Volume - ${getDateRangeLabel()}`
+            : timeRange === 'monthly'
+            ? `Monthly Transaction Volume - ${getDateRangeLabel()}`
+            : `Yearly Transaction Volume${getDateRangeLabel().includes('–') ? ` (${getDateRangeLabel()})` : ` - ${getDateRangeLabel()}`}`
+          }
+        </h3>
         
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
-              data={paymentData.dailyTransactions}
+              data={paymentData.periodTransactions}
               margin={{ top: 20, right: 30, left: 20, bottom: 30 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis 
-                dataKey="date" 
+                dataKey="period" 
                 tick={{ fill: '#374151' }}
                 tickLine={{ stroke: '#374151' }}
                 axisLine={{ stroke: '#374151' }}

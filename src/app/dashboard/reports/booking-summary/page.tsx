@@ -30,31 +30,74 @@ export default function BookingSummaryReport() {
     return `₱${price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
   };
   
+  // Helper function to get date range label for chart titles
+  const getDateRangeLabel = () => {
+    const now = new Date();
+    
+    if (dateRange === 'week') {
+      // Show current month name and year
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return monthName; // e.g., "December 2025"
+    } else if (dateRange === 'month') {
+      // Show current year
+      return now.getFullYear().toString(); // e.g., "2025"
+    } else {
+      // Show year range
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2; // Last 3 years
+      
+      if (startYear === currentYear) {
+        return currentYear.toString(); // Single year
+      } else {
+        return `${startYear}–${currentYear}`; // Year range
+      }
+    }
+  };
+
+  // Helper function to get date range info for statistics
+  const getDateRangeInfo = () => {
+    const now = new Date();
+    
+    if (dateRange === 'week') {
+      const monthName = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      return `Month: ${monthName}`;
+    } else if (dateRange === 'month') {
+      return `Year: ${now.getFullYear()}`;
+    } else {
+      const currentYear = now.getFullYear();
+      const startYear = currentYear - 2;
+      
+      if (startYear === currentYear) {
+        return `Year: ${currentYear}`;
+      } else {
+        return `Years: ${startYear}–${currentYear}`;
+      }
+    }
+  };
+
   // Generate date labels based on date range
   const getDateLabels = () => {
     const labels = [];
     const now = new Date();
     
     if (dateRange === 'week') {
-      // Last 7 days
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - i);
-        labels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+      // Current month's weeks (Week 1, Week 2, Week 3, Week 4)
+      for (let i = 1; i <= 4; i++) {
+        labels.push(`Week ${i}`);
       }
     } else if (dateRange === 'month') {
-      // Last 30 days grouped by week
-      for (let i = 4; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - (i * 7));
-        labels.push(`Week ${4-i+1}`);
-      }
-    } else {
       // Last 12 months
       for (let i = 11; i >= 0; i--) {
         const d = new Date(now);
-        d.setMonth(d.getMonth() - i);
+        d.setMonth(now.getMonth() - i);
         labels.push(d.toLocaleDateString('en-US', { month: 'short' }));
+      }
+    } else {
+      // Last 3 years
+      for (let i = 2; i >= 0; i--) {
+        const d = new Date(now);
+        d.setFullYear(now.getFullYear() - i);
+        labels.push(d.getFullYear().toString());
       }
     }
     
@@ -72,14 +115,15 @@ export default function BookingSummaryReport() {
         let startDate = new Date();
         
         if (dateRange === 'week') {
-          // Last 7 days
-          startDate.setDate(now.getDate() - 7);
+          // Current month
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
         } else if (dateRange === 'month') {
-          // Last 30 days
-          startDate.setDate(now.getDate() - 30);
-        } else {
           // Last 12 months
           startDate.setFullYear(now.getFullYear() - 1);
+          startDate.setMonth(now.getMonth());
+        } else {
+          // Last 3 years
+          startDate.setFullYear(now.getFullYear() - 3);
         }
         
         // Convert to Firestore timestamps
@@ -154,20 +198,17 @@ export default function BookingSummaryReport() {
           let dateLabel = '';
           
           if (dateRange === 'week') {
-            // Format as day of week (e.g., "Mon")
-            dateLabel = bookingDate.toLocaleDateString('en-US', { weekday: 'short' });
-          } else if (dateRange === 'month') {
-            // Group by week 
-            const currentDate = new Date();
-            const diffTime = Math.abs(currentDate.getTime() - bookingDate.getTime());
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            const weekNumber = Math.floor(diffDays / 7) + 1;
-            if (weekNumber <= 4) {
-              dateLabel = `Week ${5 - weekNumber}`;
+            // Group by week of current month
+            const weekOfMonth = Math.ceil(bookingDate.getDate() / 7);
+            if (weekOfMonth <= 4 && bookingDate.getMonth() === now.getMonth() && bookingDate.getFullYear() === now.getFullYear()) {
+              dateLabel = `Week ${weekOfMonth}`;
             }
-          } else {
+          } else if (dateRange === 'month') {
             // Format as month (e.g., "Jan")
             dateLabel = bookingDate.toLocaleDateString('en-US', { month: 'short' });
+          } else {
+            // Format as year
+            dateLabel = bookingDate.getFullYear().toString();
           }
           
           if (dateLabel && dateLabels.includes(dateLabel)) {
@@ -330,6 +371,10 @@ export default function BookingSummaryReport() {
         <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300">
           <h3 className="text-lg font-medium text-gray-900 mb-4">Booking Statistics</h3>
           
+          <div className="mb-4">
+            <p className="text-gray-500 text-sm font-medium">{getDateRangeInfo()}</p>
+          </div>
+          
           <div className="flex flex-col space-y-4">
             <div>
               <p className="text-gray-600 text-sm">Total Bookings</p>
@@ -349,7 +394,16 @@ export default function BookingSummaryReport() {
       
       {/* Bookings by date chart */}
       <div className="bg-white rounded-lg p-6 shadow-md border border-gray-300 mb-8">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Bookings Over Time</h3>
+        <div className="mb-4">
+          <h3 className="text-lg font-medium text-gray-900">
+            {dateRange === 'week' 
+              ? `Weekly Bookings - ${getDateRangeLabel()}`
+              : dateRange === 'month'
+              ? `Monthly Bookings - ${getDateRangeLabel()}`
+              : `Yearly Bookings${getDateRangeLabel().includes('–') ? ` (${getDateRangeLabel()})` : ` - ${getDateRangeLabel()}`}`
+            }
+          </h3>
+        </div>
         
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
