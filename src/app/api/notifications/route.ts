@@ -979,8 +979,19 @@ export async function POST(request: NextRequest) {
 
           const adminDb = getAdminDb();
           if (!adminDb) {
-            console.warn('⚠️ Firebase Admin not initialized - skipping in-app notification');
-            results.inApp = { error: 'Firebase Admin not initialized', success: false };
+            const errorMsg = 'Firebase Admin not initialized. Please set FIREBASE_SERVICE_ACCOUNT environment variable in Vercel/hosting platform.';
+            console.error('❌', errorMsg);
+            console.error('❌ Environment check:', {
+              hasEnvVar: !!process.env.FIREBASE_SERVICE_ACCOUNT,
+              nodeEnv: process.env.NODE_ENV,
+              vercel: process.env.VERCEL,
+              vercelEnv: process.env.VERCEL_ENV
+            });
+            results.inApp = { 
+              error: errorMsg, 
+              success: false,
+              details: 'FIREBASE_SERVICE_ACCOUNT environment variable is required for in-app notifications'
+            };
           } else {
             const notificationRef = await adminDb.collection('notifications').add(notificationData);
             console.log('✅ In-app notification created with ID:', notificationRef.id);
@@ -988,6 +999,7 @@ export async function POST(request: NextRequest) {
           }
         } catch (error: any) {
           console.error('❌ In-app notification error:', error.message);
+          console.error('❌ Error stack:', error.stack);
           results.inApp = { error: error.message, success: false };
         }
 
