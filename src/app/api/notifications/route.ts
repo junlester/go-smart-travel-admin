@@ -1005,7 +1005,7 @@ export async function POST(request: NextRequest) {
             inAppSent: results.inApp?.success !== false && !results.inApp?.error
           }
         };
-
+        
         break;
       }
       
