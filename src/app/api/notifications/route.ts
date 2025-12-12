@@ -29,7 +29,7 @@ import {
 } from '../../../utils/textBeeService';
 import { db } from '@/configs/firebase';
 import { getAdminDb, FieldValue } from '@/configs/firebaseAdmin';
-import { collection, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 
 export async function POST(request: NextRequest) {
   try {
@@ -864,6 +864,148 @@ export async function POST(request: NextRequest) {
           // Continue even if saving to Firestore fails
         }
         
+        break;
+      }
+      
+      case 'customization_status': {
+        // Send notification for customization request approval/rejection
+        const { userId, status, customizationData } = data;
+        
+        if (!userId || !status || !customizationData) {
+          throw new Error('userId, status, and customizationData are required');
+        }
+
+        // Get user data from Firebase
+        const userDocRef = doc(db, 'users', userId);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (!userDoc.exists()) {
+          throw new Error(`User with ID ${userId} not found`);
+        }
+
+        const userData = userDoc.data();
+        const userEmail = userData.email;
+        const oneSignalPlayerId = userData.oneSignalPlayerId;
+        const userName = userData.displayName || userData.email?.split('@')[0] || 'User';
+
+        const results: any = {
+          push: null,
+          email: null,
+          inApp: null
+        };
+
+        // Prepare notification messages based on status
+        const isApproved = status === 'approved';
+        const title = isApproved 
+          ? `✅ Customization Request Approved` 
+          : `❌ Customization Request Rejected`;
+        
+        const message = isApproved
+          ? `Great news! Your customization request for "${customizationData.tourPackageName}" has been approved. Your customized itinerary is now active.`
+          : `Your customization request for "${customizationData.tourPackageName}" has been rejected. Reason: ${customizationData.rejectionReason || 'Not specified'}`;
+
+        const emailSubject = isApproved
+          ? `✅ Your Tour Customization Request Has Been Approved`
+          : `❌ Your Tour Customization Request Has Been Rejected`;
+
+        const emailMessage = isApproved
+          ? `Dear ${userName},\n\nGreat news! Your customization request for "${customizationData.tourPackageName}" has been approved.\n\nYour customized itinerary is now active and you can view it in your booking details.${customizationData.adminNotes ? `\n\nAdmin Notes: ${customizationData.adminNotes}` : ''}\n\nThank you for using Go Smart Travel!`
+          : `Dear ${userName},\n\nUnfortunately, your customization request for "${customizationData.tourPackageName}" has been rejected.\n\nReason: ${customizationData.rejectionReason || 'Not specified'}${customizationData.adminNotes ? `\n\nAdmin Notes: ${customizationData.adminNotes}` : ''}\n\nIf you have any questions or concerns, please contact our support team.\n\nThank you for using Go Smart Travel!`;
+
+        // Send push notification via OneSignal (if playerId exists)
+        if (oneSignalPlayerId) {
+          try {
+            const { sendNotificationToUsers } = await import('../../../utils/oneSignalService');
+            results.push = await sendNotificationToUsers({
+              playerIds: [oneSignalPlayerId],
+              title: title,
+              message: message,
+              data: {
+                type: 'customization_status',
+                status: status,
+                customizationId: customizationData.id,
+                tourPackageId: customizationData.tourPackageId,
+                actionUrl: `customization/${customizationData.id}`
+              }
+            });
+            console.log('✅ Push notification sent to user');
+          } catch (error: any) {
+            console.error('❌ Push notification error:', error.message);
+            results.push = { error: error.message };
+          }
+        } else {
+          console.log('ℹ️ No OneSignal Player ID found for user, skipping push notification');
+        }
+
+        // Send email notification
+        if (userEmail) {
+          try {
+            results.email = await sendBulkEmailNotification(
+              [userEmail],
+              emailSubject,
+              emailMessage
+            );
+            console.log(`✅ Email sent to ${userEmail}`);
+          } catch (error: any) {
+            console.error('❌ Email notification error:', error.message);
+            results.email = { error: error.message, success: false };
+          }
+        } else {
+          console.warn('⚠️ No email address found for user');
+          results.email = { error: 'No email address found', success: false };
+        }
+
+        // Create in-app notification in Firestore using Admin SDK
+        try {
+          const notificationData = {
+            userId: userId,
+            title: title,
+            message: message,
+            type: 'customization_status',
+            status: status,
+            isRead: false,
+            createdAt: FieldValue.serverTimestamp(),
+            tourId: customizationData.tourPackageId || null,
+            bookingId: customizationData.bookingId || null,
+            userName: 'Admin',
+            userRole: 'Admin',
+            data: {
+              customizationId: customizationData.id,
+              tourPackageName: customizationData.tourPackageName,
+              rejectionReason: customizationData.rejectionReason || null,
+              adminNotes: customizationData.adminNotes || null
+            }
+          };
+
+          const adminDb = getAdminDb();
+          if (!adminDb) {
+            console.warn('⚠️ Firebase Admin not initialized - skipping in-app notification');
+            results.inApp = { error: 'Firebase Admin not initialized', success: false };
+          } else {
+            const notificationRef = await adminDb.collection('notifications').add(notificationData);
+            console.log('✅ In-app notification created with ID:', notificationRef.id);
+            results.inApp = { success: true, notificationId: notificationRef.id };
+          }
+        } catch (error: any) {
+          console.error('❌ In-app notification error:', error.message);
+          results.inApp = { error: error.message, success: false };
+        }
+
+        result = {
+          id: `customization-${status}-${Date.now()}`,
+          recipients: 1,
+          push: results.push,
+          email: results.email,
+          inApp: results.inApp,
+          success: true,
+          message: `Notifications sent to user for customization ${status}`,
+          details: {
+            pushSent: results.push?.id || false,
+            emailSent: results.email?.success !== false && !results.email?.error,
+            inAppSent: results.inApp?.success !== false && !results.inApp?.error
+          }
+        };
+
         break;
       }
       

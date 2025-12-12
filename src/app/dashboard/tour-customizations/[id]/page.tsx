@@ -88,8 +88,39 @@ export default function CustomizationDetailPage() {
         approvedAt: serverTimestamp()
       });
 
-      // TODO: Update booking with customized itinerary
-      // TODO: Send notification to user
+      // Send notification to user (email, push, and in-app)
+      try {
+        const notificationResponse = await fetch('/api/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'customization_status',
+            data: {
+              userId: customization.userId,
+              status: 'approved',
+              customizationData: {
+                id: customizationId,
+                tourPackageId: customization.tourPackageId,
+                tourPackageName: customization.tourPackageName,
+                adminNotes: adminNotes.trim(),
+                bookingId: customization.bookingId || null
+              }
+            }
+          })
+        });
+
+        const notificationResult = await notificationResponse.json();
+        if (notificationResult.success) {
+          console.log('✅ Notifications sent successfully:', notificationResult.data.details);
+        } else {
+          console.warn('⚠️ Some notifications failed:', notificationResult.error);
+        }
+      } catch (notificationError) {
+        console.error('Error sending notifications:', notificationError);
+        // Don't block the approval if notification fails
+      }
 
       alert('Customization request approved successfully!');
       router.push('/dashboard/tour-customizations');
@@ -145,7 +176,40 @@ export default function CustomizationDetailPage() {
         rejectedAt: serverTimestamp()
       });
 
-      // TODO: Send notification to user
+      // Send notification to user (email, push, and in-app)
+      try {
+        const notificationResponse = await fetch('/api/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'customization_status',
+            data: {
+              userId: customization.userId,
+              status: 'rejected',
+              customizationData: {
+                id: customizationId,
+                tourPackageId: customization.tourPackageId,
+                tourPackageName: customization.tourPackageName,
+                rejectionReason: rejectionReason.trim(),
+                adminNotes: adminNotes.trim(),
+                bookingId: customization.bookingId || null
+              }
+            }
+          })
+        });
+
+        const notificationResult = await notificationResponse.json();
+        if (notificationResult.success) {
+          console.log('✅ Notifications sent successfully:', notificationResult.data.details);
+        } else {
+          console.warn('⚠️ Some notifications failed:', notificationResult.error);
+        }
+      } catch (notificationError) {
+        console.error('Error sending notifications:', notificationError);
+        // Don't block the rejection if notification fails
+      }
 
       alert('Customization request rejected');
       router.push('/dashboard/tour-customizations');
